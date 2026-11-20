@@ -11,6 +11,7 @@ import { logAiUsage } from '@/lib/ai/usage'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { AiError } from '@/lib/ai/types'
 import { getT } from '@/lib/i18n/translate'
+import { credentialsDb } from '@/lib/credentials/server'
 
 const t = getT('Api')
 
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: t('common.conversationNotFound') }, { status: 404 })
     }
 
-    const config = await loadAiConfig(supabase, accountId).catch((err) => {
+    const config = await loadAiConfig(credentialsDb(), accountId).catch((err) => {
       // Decrypt failure — surface distinctly from "not configured".
       console.error('[ai/draft] loadAiConfig error:', err)
       throw new AiError(t('ai.storedKeyUndecryptable'), {

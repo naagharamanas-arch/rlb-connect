@@ -12,6 +12,7 @@ import { AiError, type AiProvider } from '@/lib/ai/types'
 import { normalizeOpenAiCompatibleBaseUrl } from '@/lib/ai/providers/openai-compatible'
 import { canReuseStoredAiKey } from '@/lib/ai/stored-key'
 import { getT } from '@/lib/i18n/translate'
+import { fetchAiConfig } from '@/lib/credentials/server'
 
 const t = getT('Api')
 
@@ -30,15 +31,12 @@ export async function GET() {
   try {
     const { supabase, accountId } = await getCurrentAccount()
 
-    const { data, error } = await supabase
-      .from('ai_configs')
-      // `api_key` is selected only to derive `has_key` — it is stripped
-      // out below and never returned to the client.
-      .select(
-        'provider, model, base_url, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key',
-      )
-      .eq('account_id', accountId)
-      .maybeSingle()
+    // Read with the server-only credentials reader: the keys are selected
+    // only to derive the has_* flags below (members cannot SELECT them).
+    const { data, error } = await fetchAiConfig(
+      accountId,
+      'provider, model, base_url, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key',
+    )
 
     if (error) {
       console.error('[ai/config GET] fetch error:', error)
@@ -134,11 +132,10 @@ export async function POST(request: Request) {
     const clearEmbeddingsKey = body.embeddings_api_key === null
 
     // Reuse the stored key when the form didn't send a fresh one.
-    const { data: existing } = await supabase
-      .from('ai_configs')
-      .select('id, provider, model, base_url, api_key')
-      .eq('account_id', accountId)
-      .maybeSingle()
+    const { data: existing } = await fetchAiConfig(
+      accountId,
+      'id, provider, model, base_url, api_key',
+    )
 
     let apiKeyPlain: string
     let baseUrl: string | null = null

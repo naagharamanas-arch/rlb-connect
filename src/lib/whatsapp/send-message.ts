@@ -49,6 +49,7 @@ import {
   templateContentText,
   templateHeaderMediaUrl,
 } from '@/lib/whatsapp/template-body';
+import { fetchWhatsAppConfig } from '@/lib/credentials/server'
 
 export const MEDIA_KINDS = ['image', 'video', 'document', 'audio'] as const;
 export const VALID_MESSAGE_TYPES = [
@@ -259,11 +260,7 @@ export async function sendMessageToConversation(
   const sanitizedPhone = hasValidPhone ? sendTarget : '';
 
   // WhatsApp config, account-scoped.
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .single();
+  const { data: config, error: configError } = await fetchWhatsAppConfig(accountId);
 
   if (configError || !config) {
     throw new SendMessageError(

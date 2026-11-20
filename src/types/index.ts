@@ -301,6 +301,8 @@ export interface WhatsAppConfig {
   waba_id?: string;
   access_token: string;
   verify_token?: string;
+  /** Derived, non-secret: a verify token is stored (migration 062). */
+  has_verify_token?: boolean;
   status: 'connected' | 'disconnected';
   connected_at?: string;
   /**

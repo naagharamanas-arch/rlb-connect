@@ -40,6 +40,10 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }))
 
+vi.mock('@/lib/credentials/server', () => ({
+  fetchWhatsAppConfig: async () => ({ data: { access_token: 'enc-token' }, error: null }),
+}))
+
 vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: (value: string) => `plain-${value}`,
 }))

@@ -9,6 +9,7 @@ import { loadEmbeddingsKey } from '@/lib/ai/config'
 import { ingestDocument, type IngestResult } from '@/lib/ai/knowledge'
 import { AiError } from '@/lib/ai/types'
 import { getT } from '@/lib/i18n/translate'
+import { credentialsDb } from '@/lib/credentials/server'
 
 const t = getT('Api')
 
@@ -81,7 +82,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
     if (content !== undefined) {
       const { key: embeddingsApiKey, corrupt } = await loadEmbeddingsKey(
-        supabase,
+        credentialsDb(),
         accountId,
       )
       let ingest: IngestResult
