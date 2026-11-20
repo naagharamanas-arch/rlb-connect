@@ -5,6 +5,7 @@ import { writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 
 import { E, adminClient, anonClient, assertEphemeral, call, MARKER } from './lib.mjs'
+import { encryptGcm } from './crypto.mjs'
 
 assertEphemeral()
 const admin = adminClient()
@@ -50,7 +51,8 @@ await setMember(ids.a_viewer, acctA, 'viewer')
 /** Seed one tenant. Mirrors supabase/tests/database seed_tenant. */
 async function seed(label, owner, acct) {
   const M = label === 'a' ? MARKER : 'B-fixture'
-  const phone = label === 'a' ? '+15550101' : '+15550201'
+  // Realistic E.164 numbers (US 555 test range) so the send paths accept them.
+  const phone = label === 'a' ? '+14155550101' : '+14155550201'
   const one = (t, row) => must(`insert ${t}`, admin.from(t).insert(row).select().single())
   const out = {}
   out.inv = (await one('account_invitations', { account_id: acct, token_hash: `inv-hash-${label}-${Date.now()}`, role: 'agent', expires_at: new Date(Date.now() + 864e5).toISOString(), created_by_user_id: owner })).id
@@ -61,7 +63,13 @@ async function seed(label, owner, acct) {
   await one('contact_tags', { contact_id: out.contact, tag_id: out.tag })
   out.conv = (await one('conversations', { user_id: owner, account_id: acct, contact_id: out.contact })).id
   out.msg = (await one('messages', { conversation_id: out.conv, sender_type: 'customer', content_text: `${M} message` })).id
-  await one('whatsapp_config', { user_id: owner, account_id: acct, phone_number_id: `phone-id-${label}`, access_token: 'dummy-not-a-real-token', verify_token: 'dummy-verify' })
+  // Credentials the app can really decrypt (AES-256-GCM under ENCRYPTION_KEY), so credential-
+  // bearing routes behave as in production. Meta itself is never reached: the app server runs
+  // with tests/fullstack/meta-stub.cjs preloaded, which answers and records graph.facebook.com.
+  const plain = { waToken: `fs-wa-token-${label}`, verifyToken: `fs-verify-${label}`, aiKey: `fs-ai-key-${label}`, webhookSecret: `whsec-fs-${label}` }
+  const cipher = { waToken: encryptGcm(plain.waToken), verifyToken: encryptGcm(plain.verifyToken), aiKey: encryptGcm(plain.aiKey) }
+  out.secrets = { plain, cipher }
+  await one('whatsapp_config', { user_id: owner, account_id: acct, phone_number_id: `phone-id-${label}`, access_token: cipher.waToken, verify_token: cipher.verifyToken })
   out.template = (await one('message_templates', { user_id: owner, account_id: acct, name: `tpl_${label}`, body_text: `${M} hello` })).id
   out.bcast = (await one('broadcasts', { user_id: owner, account_id: acct, name: `${M} broadcast`, template_name: `tpl_${label}` })).id
   await one('broadcast_recipients', { broadcast_id: out.bcast, contact_id: out.contact })
@@ -70,8 +78,8 @@ async function seed(label, owner, acct) {
   out.flow = (await one('flows', { user_id: owner, account_id: acct, name: `${M} flow`, trigger_type: 'manual' })).id
   await one('flow_nodes', { flow_id: out.flow, node_key: 'start', node_type: 'start' })
   out.qr = (await one('quick_replies', { account_id: acct, user_id: owner, title: `${M} quick reply`, content_text: 'hi' })).id
-  out.webhook = (await one('webhook_endpoints', { account_id: acct, url: `https://example.invalid/${label}`, secret: `whsec-dummy-${label}` })).id
-  await one('ai_configs', { account_id: acct, provider: 'openai', model: 'test-model', api_key: 'dummy-not-a-real-key' })
+  out.webhook = (await one('webhook_endpoints', { account_id: acct, url: `https://example.invalid/${label}`, secret: `whsec-fs-${label}` })).id
+  await one('ai_configs', { account_id: acct, provider: 'openai', model: 'test-model', api_key: cipher.aiKey })
   out.doc = (await one('ai_knowledge_documents', { account_id: acct, title: `${M} doc`, content: `${M} zebra policy` })).id
   await one('notifications', { account_id: acct, user_id: owner, title: `${M} notice` })
   return out

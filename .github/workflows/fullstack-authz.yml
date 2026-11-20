@@ -54,6 +54,10 @@ jobs:
       AUTOMATION_CRON_SECRET: 'ci-fullstack-cron-secret'
       FS_APP_URL: 'http://127.0.0.1:3100'
       FS_ALLOW_LOCAL: '1'
+      # Meta is never reached: the app server preloads tests/fullstack/meta-stub.cjs, which
+      # answers graph.facebook.com, records each request here, and blocks every other
+      # external host.
+      FS_META_LOG: '/tmp/fs-meta-requests.jsonl'
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
       - uses: actions/checkout@v7
@@ -112,7 +116,7 @@ jobs:
 
       - name: Start the app
         run: |
-          nohup npx next start -p 3100 > "$RUNNER_TEMP/next.log" 2>&1 &
+          NODE_OPTIONS="--require $GITHUB_WORKSPACE/tests/fullstack/meta-stub.cjs"             nohup npx next start -p 3100 > "$RUNNER_TEMP/next.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/next.pid"
           for i in $(seq 1 60); do
             if curl -s -o /dev/null "$FS_APP_URL/api/v1/me"; then echo "app is up"; exit 0; fi
@@ -126,7 +130,9 @@ jobs:
       # Sequential on purpose: the files share one world and the tenant-A snapshot
       # assertions must not interleave with writes from another file.
       - name: Run the authorization suites
-        run: node --test --test-concurrency=1 --test-reporter=spec tests/fullstack/*.test.mjs
+        # --test-force-exit: a failed assertion must not leave open Realtime sockets keeping
+        # the runner alive forever; --test-timeout bounds any single hung test.
+        run: node --test --test-concurrency=1 --test-force-exit --test-timeout=180000 --test-reporter=spec tests/fullstack/*.test.mjs
 
       - name: Show the app log on failure
         if: failure()

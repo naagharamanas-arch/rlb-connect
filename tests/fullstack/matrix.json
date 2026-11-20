@@ -865,17 +865,6 @@
    "method": "DELETE",
    "path": "/api/v1/webhooks/{{A.webhook}}",
    "foreign": "otherApiKey"
-  },
-  {
-   "id": "v1-send-into-foreign-conversation",
-   "method": "POST",
-   "path": "/api/v1/messages",
-   "foreign": "otherApiKey",
-   "body": {
-    "to": "{{A.phone}}",
-    "type": "text",
-    "text": "HIJACK"
-   }
   }
  ],
  "special": [

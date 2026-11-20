@@ -151,13 +151,55 @@ describe('the app media route /api/media/<bucket>/<path>', () => {
       route('chat-media', `${folderB}/../${folderA}/${name}`),
       route('chat-media', `${folderB}/%2e%2e/${folderA}/${name}`),
       route('chat-media', `${folderB}/${encodeURIComponent('../' + folderA + '/' + name)}`),
-      route('chat-media', `${folderA}//${name}`),
+      route('chat-media', `${folderA}//${name}`), // Next.js collapses this with a 308 (see below)
     ]
     for (const path of attempts) {
-      const r = await call({ world, principal: 'otherOwner', path })
-      assert.ok(r.status === 404 || r.status === 400, `${path} -> ${r.status}`)
-      assert.equal(r.location, null, `${path} produced a redirect`)
+      const final = await followNormalisation('otherOwner', path)
+      assert.ok(final.status === 404 || final.status === 400, `${path} ended at ${final.status}: ${final.text.slice(0, 120)}`)
+      assert.equal(final.location, null, `${path} produced a redirect to a signed URL`)
+      assert.ok(!/\/storage\/v1\/|token=/.test(final.text), `${path} exposed a storage URL`)
     }
+  })
+
+  // Next.js collapses `//` in a request path with a 308 to the clean same-origin path
+  // BEFORE any route handler (or authentication) runs, so the redirect is identical for every
+  // caller. The security property is therefore (1) the redirect itself exposes nothing — a
+  // same-origin path, no signed URL, no token — and (2) where it ENDS: the clean path is
+  // authorised like any other request.
+  async function followNormalisation(principal, path) {
+    let r = await call({ world, principal, path })
+    for (let hop = 0; r.status === 308 && hop < 2; hop += 1) {
+      assert.ok(r.location, `308 without a Location for ${path}`)
+      assert.ok(r.location.startsWith('/api/media/'), `308 Location is not the same-origin media path: ${r.location}`)
+      assert.ok(!/\/storage\/v1\/|token=|:\/\//.test(r.location), `308 Location exposes a storage URL: ${r.location}`)
+      assert.ok(!/\/\//.test(r.location), `308 Location still has a double slash: ${r.location}`)
+      assert.ok(!/\/storage\/v1\/|token=/.test(r.text), '308 body exposes a storage URL')
+      r = await call({ world, principal, path: r.location })
+    }
+    return r
+  }
+
+  it('the double-slash normalisation redirect is the same for every caller and exposes nothing', async () => {
+    const name = objects['chat-media'].split('/')[1]
+    const path = route('chat-media', `${folderA}//${name}`)
+    const seen = []
+    for (const principal of ['anon', 'otherOwner', 'viewer', 'owner']) {
+      const r = await call({ world, principal, path })
+      assert.equal(r.status, 308, `${principal} -> ${r.status}`)
+      seen.push(r.location)
+      assert.ok(!/\/storage\/v1\/|token=/.test(`${r.location}${r.text}`), `${principal}: the redirect exposes a storage URL`)
+    }
+    assert.equal(new Set(seen).size, 1, 'the normalisation redirect must not depend on who asks')
+  })
+
+  it('positive control: after normalisation the owner reaches the object, B gets 404, anon gets 401', async () => {
+    const name = objects['chat-media'].split('/')[1]
+    const path = route('chat-media', `${folderA}//${name}`)
+    const owner = await followNormalisation('owner', path)
+    assert.equal(owner.status, 302)
+    assert.match(owner.location, /\/storage\/v1\/object\/sign\//)
+    assert.equal((await followNormalisation('otherOwner', path)).status, 404)
+    assert.equal((await followNormalisation('anon', path)).status, 401)
   })
 
   it('unknown buckets and the public avatars bucket are not served through the route', async () => {

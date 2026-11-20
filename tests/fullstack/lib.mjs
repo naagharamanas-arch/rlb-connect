@@ -4,7 +4,7 @@
 // Node's built-ins (fetch, node:test, node:assert). Runs ONLY against the
 // ephemeral Supabase stack + Next server that .github/workflows/fullstack-authz.yml
 // starts on a throw-away CI runner. Refuses to run against anything else.
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
 
 export const NIL = '00000000-0000-4000-8000-000000000000'
@@ -41,13 +41,25 @@ const authOpts = { auth: { persistSession: false, autoRefreshToken: false, detec
 export const adminClient = () => createClient(E.api, E.service, authOpts)
 export const anonClient = () => createClient(E.api, E.anon, authOpts)
 
-/** supabase-js client acting as a signed-in user (RLS applies). */
+/**
+ * supabase-js client acting as a signed-in user (RLS applies) for REST and Storage.
+ * `accessToken` is the supported way to hand supabase-js an externally issued JWT.
+ *
+ * REALTIME needs one more step — use `realtimeUserClient` below. Measured against the
+ * local stack: with only an Authorization header, or only the `accessToken` option, the
+ * Realtime socket joins as `anon` (visible as `claims_role = anon` in realtime.subscription)
+ * and every postgres_changes event arrives as `errors: ["Error 401: Unauthorized"]`, so a
+ * tenant's own events never reach it.
+ */
 export function userClient(accessToken) {
-  return createClient(E.api, E.anon, {
-    ...authOpts,
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-    realtime: { params: { apikey: E.anon } },
-  })
+  return createClient(E.api, E.anon, { ...authOpts, accessToken: async () => accessToken })
+}
+
+/** A signed-in client whose Realtime socket really authenticates as the user. */
+export async function realtimeUserClient(accessToken) {
+  const client = userClient(accessToken)
+  await client.realtime.setAuth(accessToken)
+  return client
 }
 
 export function loadWorld() {
@@ -146,7 +158,24 @@ export async function snapshotA(admin, world) {
   return out
 }
 
+/** Names of the snapshot sections that differ (empty = identical), for readable failures. */
+export function diffSnapshots(a, b) {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  return [...keys].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]))
+}
+
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Requests the app server tried to make to Meta (recorded by meta-stub.cjs, which also
+ * blocks every other external host). `since` = number of lines already consumed.
+ */
+export function readMetaLog(since = 0) {
+  const file = process.env.FS_META_LOG
+  if (!file || !existsSync(file)) return []
+  return readFileSync(file, 'utf8').split('\n').filter(Boolean).slice(since).map((l) => JSON.parse(l))
+}
+export const metaLogLength = () => readMetaLog().length
 
 /** Marker string present in every tenant-A fixture; it must never appear in a foreign response. */
 export const MARKER = 'ISOLATION-MARKER-A'

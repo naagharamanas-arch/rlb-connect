@@ -133,15 +133,21 @@ export async function DELETE(_request: Request, { params }: Params) {
   try {
     const { supabase, accountId } = await requireRole('admin')
     const { id } = await params
-    const { error } = await supabase
+    // Select the deleted row so "nothing was deleted" (an unknown id, or another
+    // account's document, which the account filter and RLS both hide) is a 404 like
+    // GET and PATCH on this route — not a 200 that claims a deletion that never happened.
+    const { data: deleted, error } = await supabase
       .from('ai_knowledge_documents')
       .delete()
       .eq('account_id', accountId)
       .eq('id', id)
+      .select('id')
+      .maybeSingle()
     if (error) {
       console.error('[ai/knowledge/[id] DELETE] error:', error)
       return NextResponse.json({ error: t('ai.knowledge.deleteDocFailed') }, { status: 500 })
     }
+    if (!deleted) return NextResponse.json({ error: t('common.notFound') }, { status: 404 })
     return NextResponse.json({ success: true })
   } catch (err) {
     return toErrorResponse(err)

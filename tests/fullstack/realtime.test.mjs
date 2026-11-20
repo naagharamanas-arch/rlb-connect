@@ -9,11 +9,15 @@
 // table's replica identity logs; the test asserts a foreign subscriber can learn
 // AT MOST the primary key (never content, account or contact data) and reports
 // whether even that arrived, so the exposure stays measured rather than assumed.
+//
+// DIAGNOSTICS: every subscriber logs its channel status transitions, server "system"
+// messages and any event carrying an `errors` array. A positive control that fails
+// therefore says WHY (e.g. the socket joined as anon: "Error 401: Unauthorized").
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import { randomUUID } from 'node:crypto'
 
-import { MARKER, adminClient, anonClient, assertEphemeral, loadWorld, sleep, userClient } from './lib.mjs'
+import { MARKER, adminClient, anonClient, assertEphemeral, loadWorld, realtimeUserClient, sleep } from './lib.mjs'
 
 assertEphemeral()
 const world = loadWorld()
@@ -21,25 +25,49 @@ const admin = adminClient()
 
 const SETTLE_MS = 6000
 const WAIT_MS = 15000
+const READY_MS = 20000
 
-function subscribe(client, token, table, label) {
+const all = []
+
+function diag(label, ...args) {
+  console.log(`[realtime:${label}]`, ...args)
+}
+
+function subscribe(client, table, label) {
   const events = []
-  if (token) client.realtime.setAuth(token)
-  const channel = client
+  const sub = { label, table, client, events, statuses: [], systems: [], ready: null, channel: null }
+  sub.channel = client
     .channel(`fs-${label}-${table}-${randomUUID()}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => events.push(payload))
-  const ready = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label}: subscribe timed out`)), WAIT_MS)
-    channel.subscribe((status, err) => {
-      if (status === 'SUBSCRIBED') { clearTimeout(timer); resolve() }
-      // An anon / unauthorised subscription may be refused outright: that is also "no data".
-      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-        clearTimeout(timer)
-        resolve(`refused:${status}:${err?.message ?? ''}`)
-      }
+    .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
+      events.push(payload)
+      if (payload.errors) diag(label, `${payload.eventType} event carried errors:`, JSON.stringify(payload.errors))
+    })
+    .on('system', {}, (payload) => {
+      sub.systems.push(payload)
+      diag(label, 'system:', payload.status, payload.extension, payload.message)
+    })
+  sub.ready = new Promise((resolve) => {
+    let subscribed = false
+    let pgReady = false
+    const finish = (outcome) => { clearTimeout(timer); resolve(outcome) }
+    const timer = setTimeout(() => {
+      diag(label, 'NOT READY after', READY_MS, 'ms; statuses=', sub.statuses.join('>'), 'systems=', JSON.stringify(sub.systems))
+      resolve('timeout')
+    }, READY_MS)
+    sub.channel.on('system', {}, (p) => {
+      if (p.extension === 'postgres_changes' && p.status === 'ok') pgReady = true
+      if (p.status === 'error') finish(`refused:${p.message}`)
+      if (subscribed && pgReady) finish('ready')
+    })
+    sub.channel.subscribe((status, err) => {
+      sub.statuses.push(status)
+      diag(label, 'status:', status, err ? `error=${err.message ?? JSON.stringify(err)}` : '')
+      if (status === 'SUBSCRIBED') { subscribed = true; if (pgReady) finish('ready') }
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') finish(`refused:${status}`)
     })
   })
-  return { label, client, channel, events, ready }
+  all.push(sub)
+  return sub
 }
 
 async function waitFor(pred, ms = WAIT_MS) {
@@ -51,30 +79,32 @@ async function waitFor(pred, ms = WAIT_MS) {
   return false
 }
 
+const clientFor = async (principal) =>
+  principal === 'anon' ? anonClient() : realtimeUserClient(world.users[principal].session.access_token)
+
 let subs
 before(async () => {
-  const mk = (principal) => {
-    if (principal === 'anon') return { client: anonClient(), token: null }
-    const t = world.users[principal].session.access_token
-    return { client: userClient(t), token: t }
-  }
   subs = {}
-  for (const p of ['owner', 'viewer', 'otherOwner', 'anon']) {
-    const { client, token } = mk(p)
-    subs[p] = subscribe(client, token, 'messages', p)
+  for (const p of ['owner', 'viewer', 'otherOwner', 'anon']) subs[p] = subscribe(await clientFor(p), 'messages', p)
+  const outcomes = await Promise.all(Object.values(subs).map((s) => s.ready))
+  diag('setup', 'outcomes:', JSON.stringify(Object.fromEntries(Object.keys(subs).map((p, i) => [p, outcomes[i]]))))
+  // The three signed-in subscribers MUST be fully subscribed: an authenticated client that
+  // is refused or never becomes ready would make every positive control meaningless.
+  for (const p of ['owner', 'viewer', 'otherOwner']) {
+    assert.equal(outcomes[Object.keys(subs).indexOf(p)], 'ready', `${p} subscriber was not ready: ${subs[p].statuses.join('>')}`)
   }
-  await Promise.all(Object.values(subs).map((s) => s.ready))
-  await sleep(1500)
 })
 
 after(async () => {
-  for (const s of Object.values(subs ?? {})) {
+  for (const s of all) {
     try { await s.client.removeChannel(s.channel) } catch { /* ignore */ }
     try { s.client.realtime.disconnect() } catch { /* ignore */ }
   }
 })
 
-const received = (p, type, id) => subs[p].events.some((e) => e.eventType === type && (e.new?.id === id || e.old?.id === id))
+/** An event that carries DATA for `id` (events carrying only an `errors` array never match). */
+const received = (p, type, id) =>
+  subs[p].events.some((e) => e.eventType === type && !e.errors && (e.new?.id === id || e.old?.id === id))
 
 describe('postgres_changes on messages', () => {
   let msgId
@@ -120,7 +150,7 @@ describe('postgres_changes on messages', () => {
     assert.ok(await waitFor(() => received('owner', 'DELETE', msgId)), 'positive control: tenant A owner never received the DELETE')
     await sleep(SETTLE_MS)
     for (const p of ['otherOwner', 'anon']) {
-      const deletes = subs[p].events.filter((e) => e.eventType === 'DELETE')
+      const deletes = subs[p].events.filter((e) => e.eventType === 'DELETE' && !e.errors)
       for (const e of deletes) {
         const keys = Object.keys(e.old ?? {})
         assert.deepEqual(keys.filter((k) => k !== 'id'), [], `${p} received more than the primary key in a DELETE: ${keys.join(',')}`)
@@ -128,26 +158,29 @@ describe('postgres_changes on messages', () => {
       }
       // Reported, not assumed: whether the bare id of a foreign deleted row arrived at all.
       console.log(`[realtime] DELETE of a tenant A message delivered to ${p}: ${deletes.length > 0 ? 'YES (primary key only)' : 'no'}`)
+      // Verified platform behaviour, surfaced (not hidden): Realtime does not RLS-filter DELETE
+      // events, so the bare primary key of a deleted row reaches subscribers of any tenant.
+      if (deletes.length > 0) {
+        console.log(`::warning title=Realtime DELETE exposure::${p} received the primary key of another tenant's deleted row (no content, no account id). Known Realtime behaviour: DELETE events are not RLS-filtered.`)
+      }
     }
   })
 })
 
 describe('postgres_changes on a user-scoped table', () => {
   it("a tenant A notification is not delivered to tenant B or anon", async () => {
-    const mine = subscribe(userClient(world.users.owner.session.access_token), world.users.owner.session.access_token, 'notifications', 'owner-notif')
-    const theirs = subscribe(userClient(world.users.otherOwner.session.access_token), world.users.otherOwner.session.access_token, 'notifications', 'other-notif')
-    const anon = subscribe(anonClient(), null, 'notifications', 'anon-notif')
-    await Promise.all([mine.ready, theirs.ready, anon.ready])
-    await sleep(1500)
+    const mine = subscribe(await clientFor('owner'), 'notifications', 'owner-notif')
+    const theirs = subscribe(await clientFor('otherOwner'), 'notifications', 'other-notif')
+    const anon = subscribe(await clientFor('anon'), 'notifications', 'anon-notif')
+    const outcomes = await Promise.all([mine.ready, theirs.ready, anon.ready])
+    assert.equal(outcomes[0], 'ready', `owner notifications subscriber not ready: ${mine.statuses.join('>')}`)
+    assert.equal(outcomes[1], 'ready', `tenant B notifications subscriber not ready: ${theirs.statuses.join('>')}`)
     const { data, error } = await admin.from('notifications')
       .insert({ account_id: world.accounts.a, user_id: world.users.owner.id, title: `${MARKER} realtime notice` }).select('id').single()
     assert.equal(error, null)
-    assert.ok(await waitFor(() => mine.events.some((e) => e.new?.id === data.id)), 'positive control: the recipient never received it')
+    assert.ok(await waitFor(() => mine.events.some((e) => !e.errors && e.new?.id === data.id)), 'positive control: the recipient never received it')
     await sleep(SETTLE_MS)
-    assert.equal(theirs.events.some((e) => e.new?.id === data.id), false, 'tenant B received a tenant A notification')
-    assert.equal(anon.events.some((e) => e.new?.id === data.id), false, 'anon received a tenant A notification')
-    for (const s of [mine, theirs, anon]) {
-      try { await s.client.removeChannel(s.channel); s.client.realtime.disconnect() } catch { /* ignore */ }
-    }
+    assert.equal(theirs.events.some((e) => !e.errors && e.new?.id === data.id), false, 'tenant B received a tenant A notification')
+    assert.equal(anon.events.some((e) => !e.errors && e.new?.id === data.id), false, 'anon received a tenant A notification')
   })
 })

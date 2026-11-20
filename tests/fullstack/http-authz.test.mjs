@@ -17,7 +17,7 @@ import { createHmac } from 'node:crypto'
 import { before, describe, it } from 'node:test'
 
 import {
-  E, MARKER, NIL, RANK, adminClient, assertEphemeral, call, fill, isDenied, loadWorld, snapshotA,
+  E, MARKER, NIL, RANK, adminClient, assertEphemeral, call, fill, isDenied, diffSnapshots, loadWorld, metaLogLength, readMetaLog, snapshotA,
 } from './lib.mjs'
 
 assertEphemeral()
@@ -94,20 +94,113 @@ describe("tenancy — tenant B's credentials against tenant A's real resources",
   }
 })
 
+describe('API sends and deletes stay inside the caller account', () => {
+  const digits = (s) => String(s).replace(/\D/g, '')
+
+  it("tenant B's key sending to a number that is a tenant A contact is delivered through B only and touches nothing of A", async () => {
+    // The v1 send takes a PHONE NUMBER (not a conversation id): B may message any number, and
+    // that must resolve to B's OWN contact/conversation and B's own WhatsApp credentials.
+    // Snapshot of tenant A taken right before THIS call, so only B's effect is measured (earlier
+    // positive controls legitimately touch A, e.g. api_keys.last_used_at when A's own key is used).
+    const aBefore = await snapshotA(admin, world)
+    const before = metaLogLength()
+    const text = `hello from tenant B ${Date.now()}`
+    const r = await call({
+      world, principal: 'otherApiKey', method: 'POST', path: '/api/v1/messages',
+      body: { to: world.A.phone, type: 'text', text },
+    })
+    assert.ok(r.status >= 200 && r.status < 300, `B's send got ${r.status}: ${r.text.slice(0, 200)}`)
+
+    // Meta (stubbed) saw exactly one send, with B's number id and a bearer token, to the number.
+    const seen = readMetaLog(before)
+    const sends = seen.filter((e) => e.kind === 'meta' && e.method === 'POST')
+    assert.equal(sends.length, 1, `expected one Meta send, saw ${JSON.stringify(seen)}`)
+    assert.match(sends[0].url, /\/phone-id-b\/messages/, "B's send must use B's phone number id")
+    assert.ok(sends[0].hasBearer, 'B token was not decrypted and presented')
+    assert.equal(digits(sends[0].body.to), digits(world.A.phone))
+    assert.ok(!seen.some((e) => String(e.url).includes('phone-id-a')), "tenant A's WhatsApp number was used")
+    assert.ok(!seen.some((e) => e.kind === 'blocked'), 'an external request was attempted and blocked')
+
+    // Data: the number now has TWO contacts, one per account; A's is the original, untouched.
+    // (compare on the normalised digits: the app stores a created contact's phone without the '+')
+    const { data: contacts } = await admin.from('contacts').select('id, account_id, name').eq('phone_normalized', digits(world.A.phone))
+    assert.equal(contacts.length, 2)
+    assert.deepEqual(contacts.map((c) => c.account_id).sort(), [world.accounts.a, world.accounts.b].sort())
+    assert.equal(contacts.find((c) => c.account_id === world.accounts.a).id, world.A.contact)
+    const bContact = contacts.find((c) => c.account_id === world.accounts.b)
+    const { data: bConv } = await admin.from('conversations').select('id, account_id').eq('contact_id', bContact.id)
+    assert.equal(bConv.length, 1)
+    assert.equal(bConv[0].account_id, world.accounts.b)
+    const { data: bMsgs } = await admin.from('messages').select('id').eq('conversation_id', bConv[0].id).eq('content_text', text)
+    assert.equal(bMsgs.length, 1, "the message is not in B's own conversation")
+
+    // Nothing in tenant A changed: no message, no conversation, no contact edit.
+    const aAfter = await snapshotA(admin, world)
+    assert.deepEqual(diffSnapshots(aBefore, aAfter), [], "tenant B's send changed tenant A data")
+    assert.equal(JSON.stringify(aAfter), JSON.stringify(aBefore))
+    const { data: planted } = await admin.from('messages').select('id').eq('content_text', text).eq('conversation_id', world.A.conv)
+    assert.deepEqual(planted, [])
+  })
+
+  it("positive control: tenant A's key sends through A's own number (so the stub and fixtures are not vacuous)", async () => {
+    const before = metaLogLength()
+    const r = await call({
+      world, principal: 'apiKey', method: 'POST', path: '/api/v1/messages',
+      body: { to: world.B.phone, type: 'text', text: 'hello from tenant A' },
+    })
+    assert.ok(r.status >= 200 && r.status < 300, `A's send got ${r.status}: ${r.text.slice(0, 200)}`)
+    const sends = readMetaLog(before).filter((e) => e.kind === 'meta' && e.method === 'POST')
+    assert.equal(sends.length, 1)
+    assert.match(sends[0].url, /\/phone-id-a\/messages/)
+  })
+
+  it('DELETE of a knowledge document: 404 for another tenant (and the row survives); 200 then 404 for its own admin', async () => {
+    const { data: doc, error } = await admin.from('ai_knowledge_documents')
+      .insert({ account_id: world.accounts.a, title: `${MARKER} delete-me`, content: 'x' }).select('id').single()
+    assert.equal(error, null)
+    const foreign = await call({ world, principal: 'otherOwner', method: 'DELETE', path: `/api/ai/knowledge/${doc.id}` })
+    assert.equal(foreign.status, 404, `tenant B got ${foreign.status}: ${foreign.text}`)
+    assert.equal(foreign.json?.success, undefined, 'a 404 must not claim success')
+    const { data: still } = await admin.from('ai_knowledge_documents').select('id').eq('id', doc.id)
+    assert.equal(still.length, 1, "tenant B's delete removed tenant A's document")
+
+    const own = await call({ world, principal: 'admin', method: 'DELETE', path: `/api/ai/knowledge/${doc.id}` })
+    assert.equal(own.status, 200, `A admin got ${own.status}: ${own.text}`)
+    const { data: gone } = await admin.from('ai_knowledge_documents').select('id').eq('id', doc.id)
+    assert.equal(gone.length, 0)
+    const again = await call({ world, principal: 'admin', method: 'DELETE', path: `/api/ai/knowledge/${doc.id}` })
+    assert.equal(again.status, 404)
+  })
+})
+
 describe('secrets never leave the server (checked while the seeded credentials still exist)', () => {
-  it('credentials are never returned by any read endpoint', async () => {
+  it('no read endpoint returns a stored credential, in plaintext or as ciphertext', async () => {
+    const s = world.A.secrets
+    const secrets = [...Object.values(s.plain), ...Object.values(s.cipher), world.keys.apiKey]
     const reads = [
-      ['owner', '/api/ai/config'], ['owner', '/api/whatsapp/config'], ['admin', '/api/account/api-keys'],
-      ['owner', '/api/whatsapp/config/verify-registration'],
+      ['owner', '/api/ai/config'], ['viewer', '/api/ai/config'], ['owner', '/api/whatsapp/config'], ['viewer', '/api/whatsapp/config'],
+      ['admin', '/api/account/api-keys'], ['viewer', '/api/account/api-keys'], ['owner', '/api/whatsapp/config/verify-registration'],
+      ['owner', '/api/whatsapp/health'],
     ]
     for (const [principal, path] of reads) {
       const r = await call({ world, principal, path })
-      for (const secret of ['dummy-not-a-real-key', 'dummy-not-a-real-token', 'dummy-verify', 'whsec-dummy', world.keys.apiKey]) {
-        assert.ok(!r.text.includes(secret), `${path} leaked a credential`)
-      }
+      assert.ok(r.status < 500, `${principal} ${path} -> ${r.status}`)
+      for (const secret of secrets) assert.ok(!r.text.includes(secret), `${principal} ${path} leaked a credential`)
     }
     const hooks = await call({ world, path: '/api/v1/webhooks', headers: { authorization: `Bearer ${world.keys.apiKey}` } })
-    assert.ok(!hooks.text.includes('whsec-dummy'), '/api/v1/webhooks leaked a signing secret')
+    assert.equal(hooks.status, 200)
+    assert.ok(!hooks.text.includes(s.plain.webhookSecret), '/api/v1/webhooks leaked a signing secret')
+  })
+
+  it('positive control: the same endpoints do return the NON-secret facts (the check above is not vacuous)', async () => {
+    const ai = await call({ world, principal: 'owner', path: '/api/ai/config' })
+    assert.equal(ai.status, 200)
+    assert.equal(ai.json?.configured, true)
+    assert.equal(ai.json?.has_key, true)
+    assert.equal(ai.json?.api_key, undefined)
+    const keys = await call({ world, principal: 'admin', path: '/api/account/api-keys' })
+    assert.equal(keys.status, 200)
+    assert.ok(keys.text.includes('fs-all'), 'the key list should name the key')
   })
 })
 
