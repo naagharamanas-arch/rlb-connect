@@ -69,3 +69,38 @@ jobs:
       # just the absence of an error.
       - name: Verify the resulting schema
         run: supabase db query --local --file supabase/ci/verify-schema.sql
+
+      # Behavioural cross-tenant isolation tests (pgTAP, supabase/tests/database).
+      # The step above proves the schema EXISTS; this proves it ISOLATES: for
+      # every table, role-gated RPC and storage bucket it checks that one tenant
+      # (or anon) cannot read, change or plant another tenant's data, with
+      # positive controls so a broken harness cannot pass vacuously. It runs
+      # only against this job's throw-away local database (--local); the suite
+      # also refuses to run if the database holds any non-test user. The two
+      # previously known, non-cross-tenant gaps (G1: missing Data API grants,
+      # F1: member-readable credential columns) are CLOSED and enforced as hard
+      # assertions; any failing assertion fails the job.
+      - name: Database tests (cross-tenant isolation)
+        run: supabase test db --local
+
+      # Second pass, "open grants": the same suite with the legacy open Data API
+      # grants emulated ON TOP of the real ones (tests.open_grants), so RLS is
+      # again the only barrier under test and a regression in a policy cannot hide
+      # behind the least-privilege grants from migration 061. The first pass above
+      # runs against the real grants, where every positive control proves an
+      # allowed operation actually works.
+      - name: Database tests (RLS as the only barrier, open grants emulated)
+        run: |
+          supabase db query --local "alter database postgres set tests.open_grants = 'on'"
+          supabase test db --local
+          supabase db query --local "alter database postgres reset tests.open_grants"
+
+      # Third pass, "older project": give the database the legacy open default
+      # privileges, then re-apply 061 over them and re-run the suite. Proves the
+      # migration converges an over-granted project to the same least-privilege
+      # state, not only a fresh one. Last step: it leaves the database modified.
+      - name: Database tests (061 re-applied over legacy open grants)
+        run: |
+          supabase db query --local --file supabase/ci/legacy-open-grants.sql
+          supabase db query --local --file supabase/migrations/061_data_api_grants.sql
+          supabase test db --local
