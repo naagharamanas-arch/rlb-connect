@@ -175,9 +175,11 @@ create function tests.probe_val(p_user uuid, p_expr text) returns text
 language sql as $$ select tests._probe(p_user, p_expr, 'val') $$;
 
 -- ---- emulate the legacy open Data-API grants (per-transaction) --------------
--- The migrations never GRANT table privileges (they predate Supabase's
--- restrictive 2026 default for public tables) and rely on RLS alone — known
--- gap G1, see 060_known_gaps. To test RLS as THE barrier, each test file calls
+-- Before migration 061 the migrations never GRANTed table privileges (they
+-- predate Supabase's restrictive 2026 default for public tables) and relied on
+-- RLS alone — former gap G1, now CLOSED by 061 and asserted in 060 and 070.
+-- The real grants are therefore the default under test; the "open grants" mode
+-- keeps this emulation to test RLS as THE barrier: each test file calls
 -- this INSIDE its own transaction (rolled back with it): everything is
 -- granted to anon/authenticated/service_role, then migration 027's
 -- column-level intent is re-applied. If RLS holds under maximal grants it
@@ -245,9 +247,11 @@ update tests.table_class set owner_readable = false
 
 -- ---- per-(table, op) minimum role, derived from the policies as they stand --
 -- min_rank: 1 viewer, 2 agent, 3 admin, 4 owner; NULL = no policy (nobody).
--- Rows with gap = 'F1' are the same-tenant credential-visibility gap: the
--- value here is the SECURE target (admin+); 060_known_gaps asserts it under a
--- visible TODO, and 030_role_matrix skips them.
+-- `gap` marks a row that 030_role_matrix must skip because its behaviour is
+-- asserted elsewhere; no row is currently marked. The former F1 gap
+-- (same-tenant credential visibility) is CLOSED by migration 063: members may
+-- read the non-secret columns of the credential tables (rank 1 below), while the
+-- secret columns themselves are asserted unreadable in 060 and 080.
 create table tests.role_expect (
   tbl      text not null,
   op       text not null check (op in ('SELECT','INSERT','UPDATE','DELETE')),
