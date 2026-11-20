@@ -68,6 +68,7 @@ import {
 } from "@/lib/inbox/business-reaction";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { DELETION_CHANGES, deletionFor } from "@/lib/realtime/deletions";
 import {
   confirmedSendUpdate,
   isTempMessage,
@@ -513,20 +514,15 @@ export function MessageThread({
           setReactions((prev) => prev.map((r) => (r.id === row.id ? row : r)));
         },
       )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "message_reactions",
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const old = payload.old as Partial<MessageReaction>;
-          if (!old?.id) return;
-          setReactions((prev) => prev.filter((r) => r.id !== old.id));
-        },
-      )
+      // A removed reaction arrives as a deletion signal (DELETE events are not published —
+      // migration 065). Signals are tenant-scoped by RLS; this conversation's are picked
+      // out here because the signal table has no per-conversation column to filter on.
+      .on("postgres_changes", DELETION_CHANGES, (payload) => {
+        const old = deletionFor("message_reactions", payload) as Partial<MessageReaction> | null;
+        if (!old?.id) return;
+        if (old.conversation_id && old.conversation_id !== conversationId) return;
+        setReactions((prev) => prev.filter((r) => r.id !== old.id));
+      })
       .subscribe();
 
     return () => {

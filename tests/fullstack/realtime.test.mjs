@@ -5,10 +5,14 @@
 // webhook / engines do) must reach A's members and nobody else.
 //
 // INSERT and UPDATE are RLS-filtered per subscriber by Realtime: a foreign or anon
-// subscriber receiving one is a hard failure. DELETE events carry only what the
-// table's replica identity logs; the test asserts a foreign subscriber can learn
-// AT MOST the primary key (never content, account or contact data) and reports
-// whether even that arrived, so the exposure stays measured rather than assumed.
+// subscriber receiving one is a hard failure.
+//
+// DELETE: Realtime never RLS-filters DELETE events, so migration 065 stops publishing
+// them. NO subscriber of ANY kind (the tenant itself included) may ever receive a DELETE
+// event. The app's legitimate "something was deleted" needs are served by deletion
+// signals: INSERTs into public.realtime_deletions, which ARE RLS-filtered. The owning
+// tenant receives them, a foreign tenant and anon never do, and a deleted notification
+// reaches only the notified user.
 //
 // DIAGNOSTICS: every subscriber logs its channel status transitions, server "system"
 // messages and any event carrying an `errors` array. A positive control that fails
@@ -83,10 +87,17 @@ const clientFor = async (principal) =>
   principal === 'anon' ? anonClient() : realtimeUserClient(world.users[principal].session.access_token)
 
 let subs
+let dels
 before(async () => {
   subs = {}
+  dels = {}
   for (const p of ['owner', 'viewer', 'otherOwner', 'anon']) subs[p] = subscribe(await clientFor(p), 'messages', p)
-  const outcomes = await Promise.all(Object.values(subs).map((s) => s.ready))
+  // Deletion-signal subscribers (the replacement for DELETE events).
+  for (const p of ['owner', 'viewer', 'otherOwner', 'anon']) dels[p] = subscribe(await clientFor(p), 'realtime_deletions', `del-${p}`)
+  const outcomes = await Promise.all([...Object.values(subs), ...Object.values(dels)].map((s) => s.ready))
+  for (const [i, p] of ['owner', 'viewer', 'otherOwner'].entries()) {
+    assert.equal(outcomes[4 + i], 'ready', `${p} deletion-signal subscriber was not ready: ${dels[p].statuses.join('>')}`)
+  }
   diag('setup', 'outcomes:', JSON.stringify(Object.fromEntries(Object.keys(subs).map((p, i) => [p, outcomes[i]]))))
   // The three signed-in subscribers MUST be fully subscribed: an authenticated client that
   // is refused or never becomes ready would make every positive control meaningless.
@@ -144,26 +155,46 @@ describe('postgres_changes on messages', () => {
     assert.equal(received('viewer', 'INSERT', data.id), false, "tenant A viewer received tenant B's INSERT")
   })
 
-  it('DELETE: a foreign subscriber learns at most the primary key', async () => {
+  /** True when `p` received the deletion signal for (table, id). */
+  const signalFor = (p, table, id) =>
+    dels[p].events.some((e) => !e.errors && e.new?.table_name === table && e.new?.old_row?.id === id)
+  const deleteEventsAnywhere = () =>
+    all.flatMap((x) => x.events.map((e) => ({ who: x.label, e }))).filter(({ e }) => e.eventType === 'DELETE')
+
+  it('DELETE: no subscriber of any kind receives a DELETE event; the owning tenant receives a deletion signal instead', async () => {
     const { error } = await admin.from('messages').delete().eq('id', msgId)
     assert.equal(error, null)
-    assert.ok(await waitFor(() => received('owner', 'DELETE', msgId)), 'positive control: tenant A owner never received the DELETE')
+    // The replacement works: both members of tenant A are told which message went away.
+    assert.ok(await waitFor(() => signalFor('owner', 'messages', msgId)), 'positive control: tenant A owner never received the deletion signal')
+    assert.ok(await waitFor(() => signalFor('viewer', 'messages', msgId)), 'positive control: tenant A viewer never received the deletion signal')
     await sleep(SETTLE_MS)
+    // ... and nobody else is: no cross-tenant signal, none for anon.
+    assert.equal(signalFor('otherOwner', 'messages', msgId), false, 'tenant B received a tenant A deletion signal')
+    assert.equal(signalFor('anon', 'messages', msgId), false, 'anon received a tenant A deletion signal')
     for (const p of ['otherOwner', 'anon']) {
-      const deletes = subs[p].events.filter((e) => e.eventType === 'DELETE' && !e.errors)
-      for (const e of deletes) {
-        const keys = Object.keys(e.old ?? {})
-        assert.deepEqual(keys.filter((k) => k !== 'id'), [], `${p} received more than the primary key in a DELETE: ${keys.join(',')}`)
-        assert.ok(!JSON.stringify(e).includes(MARKER), `${p} saw tenant A content in a DELETE`)
-      }
-      // Reported, not assumed: whether the bare id of a foreign deleted row arrived at all.
-      console.log(`[realtime] DELETE of a tenant A message delivered to ${p}: ${deletes.length > 0 ? 'YES (primary key only)' : 'no'}`)
-      // Verified platform behaviour, surfaced (not hidden): Realtime does not RLS-filter DELETE
-      // events, so the bare primary key of a deleted row reaches subscribers of any tenant.
-      if (deletes.length > 0) {
-        console.log(`::warning title=Realtime DELETE exposure::${p} received the primary key of another tenant's deleted row (no content, no account id). Known Realtime behaviour: DELETE events are not RLS-filtered.`)
-      }
+      assert.ok(!JSON.stringify(dels[p].events).includes(MARKER), `${p} saw tenant A data in a deletion signal`)
     }
+    // The leak itself: no DELETE event reaches ANYONE (not even the owner: they are not published).
+    const deletes = deleteEventsAnywhere()
+    assert.deepEqual(deletes.map(({ who }) => who), [], `DELETE events were delivered: ${JSON.stringify(deletes).slice(0, 300)}`)
+    // The signal itself carries identifiers only.
+    const sig = dels.owner.events.find((e) => e.new?.table_name === 'messages' && e.new?.old_row?.id === msgId)
+    assert.deepEqual(Object.keys(sig.new.old_row).sort(), ['conversation_id', 'id'], 'the signal must hold identifiers only')
+  })
+
+  it('DELETE of a tenant B row: tenant A and anon receive neither a DELETE event nor a signal (reverse direction)', async () => {
+    const { data, error } = await admin.from('messages')
+      .insert({ conversation_id: world.B.conv, sender_type: 'customer', content_text: 'B-fixture delete me' }).select('id').single()
+    assert.equal(error, null)
+    assert.ok(await waitFor(() => received('otherOwner', 'INSERT', data.id)), 'positive control: B received its own INSERT')
+    const { error: delErr } = await admin.from('messages').delete().eq('id', data.id)
+    assert.equal(delErr, null)
+    assert.ok(await waitFor(() => signalFor('otherOwner', 'messages', data.id)), 'positive control: tenant B owner never received its own deletion signal')
+    await sleep(SETTLE_MS)
+    for (const p of ['owner', 'viewer', 'anon']) {
+      assert.equal(signalFor(p, 'messages', data.id), false, `${p} received a tenant B deletion signal`)
+    }
+    assert.deepEqual(deleteEventsAnywhere().map(({ who }) => who), [])
   })
 })
 
@@ -182,5 +213,20 @@ describe('postgres_changes on a user-scoped table', () => {
     await sleep(SETTLE_MS)
     assert.equal(theirs.events.some((e) => !e.errors && e.new?.id === data.id), false, 'tenant B received a tenant A notification')
     assert.equal(anon.events.some((e) => !e.errors && e.new?.id === data.id), false, 'anon received a tenant A notification')
+  })
+
+  it('a deleted notification is signalled to the notified user only (not a teammate, tenant B or anon) and never as a DELETE event', async () => {
+    const { data, error } = await admin.from('notifications')
+      .insert({ account_id: world.accounts.a, user_id: world.users.owner.id, title: `${MARKER} to delete` }).select('id').single()
+    assert.equal(error, null)
+    const { error: delErr } = await admin.from('notifications').delete().eq('id', data.id)
+    assert.equal(delErr, null)
+    const has = (p) => dels[p].events.some((e) => !e.errors && e.new?.table_name === 'notifications' && e.new?.old_row?.id === data.id)
+    assert.ok(await waitFor(() => has('owner')), 'positive control: the notified user never received the deletion signal')
+    await sleep(SETTLE_MS)
+    assert.equal(has('viewer'), false, 'a teammate received someone elses notification-deletion signal')
+    assert.equal(has('otherOwner'), false, 'tenant B received a tenant A notification-deletion signal')
+    assert.equal(has('anon'), false, 'anon received a notification-deletion signal')
+    assert.deepEqual(all.flatMap((x) => x.events).filter((e) => e.eventType === 'DELETE'), [], 'a DELETE event was delivered')
   })
 })

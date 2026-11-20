@@ -25,7 +25,7 @@ select c.tbl, o.op,
   from tests.table_class c
  cross join (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) o(op);
 
-select is((select count(*)::int from grant_expect), 148, 'grant matrix covers 37 tables x 4 operations');
+select is((select count(*)::int from grant_expect), (select count(*)::int * 4 from tests.table_class), 'grant matrix covers every classified table x 4 operations');
 
 -- ---- anon: nothing --------------------------------------------------------------
 select is(

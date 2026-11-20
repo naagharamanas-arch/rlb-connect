@@ -233,7 +233,7 @@ insert into tests.table_class (tbl, class) values
   ('member_presence','tenant'), ('api_keys','tenant'), ('notifications','tenant'),
   ('webhook_endpoints','tenant'), ('ai_configs','tenant'), ('ai_knowledge_documents','tenant'),
   ('ai_knowledge_chunks','tenant'), ('ai_usage_log','tenant'), ('quick_replies','tenant'),
-  ('pending_message_statuses','tenant');
+  ('pending_message_statuses','tenant'), ('realtime_deletions','tenant');
 
 insert into tests.table_class (tbl, class, fk_col, parent) values
   ('messages','child','conversation_id','conversations'),
@@ -289,6 +289,7 @@ insert into tests.role_expect (tbl, op, min_rank) values
   ('flow_runs','SELECT',1), ('flow_runs','INSERT',null), ('flow_runs','UPDATE',null), ('flow_runs','DELETE',null),
   ('flows','SELECT',1), ('flows','INSERT',2), ('flows','UPDATE',2), ('flows','DELETE',2),
   ('member_presence','SELECT',1), ('member_presence','INSERT',null), ('member_presence','UPDATE',null), ('member_presence','DELETE',null),
+  ('realtime_deletions','SELECT',1), ('realtime_deletions','INSERT',null), ('realtime_deletions','UPDATE',null), ('realtime_deletions','DELETE',null),
   ('message_reactions','SELECT',1), ('message_reactions','INSERT',2), ('message_reactions','UPDATE',2), ('message_reactions','DELETE',2),
   ('message_templates','SELECT',1), ('message_templates','INSERT',3), ('message_templates','UPDATE',3), ('message_templates','DELETE',3),
   ('messages','SELECT',1), ('messages','INSERT',2), ('messages','UPDATE',2), ('messages','DELETE',2),
@@ -316,6 +317,9 @@ language sql stable as $$
   select case when p_tbl = 'notifications' then 'read_at'
          else (select column_name::text from information_schema.columns
                where table_schema = 'public' and table_name = p_tbl
+                 -- an `identity always` / generated column cannot be set by an UPDATE (428C9),
+                 -- which would mask the privilege / RLS outcome the probe is after
+                 and is_identity = 'NO' and is_generated = 'NEVER'
                order by ordinal_position limit 1) end
 $$;
 
@@ -413,6 +417,7 @@ begin
   insert into flow_run_events (flow_run_id, event_type) values (v_run, 'started');
 
   insert into member_presence (user_id, account_id) values (p_owner, p_acct);
+  insert into realtime_deletions (account_id, table_name, old_row) values (p_acct, 'messages', jsonb_build_object('id', gen_random_uuid()));
   insert into api_keys (account_id, name, key_prefix, key_hash)
   values (p_acct, 'key-' || p_label, 'rlbtest_' || p_label, 'hash-' || p_label || '-' || gen_random_uuid());
   insert into notifications (account_id, user_id, title) values (p_acct, p_owner, 'notice ' || p_label);
@@ -470,5 +475,5 @@ create function tests.u(p_name text) returns uuid language sql stable as $$ sele
 
 select plan(2);
 select ok(true, 'helpers installed');
-select is((select count(*) from tests.table_class)::int, 37, 'classification lists 37 tables');
+select is((select count(*) from tests.table_class)::int, 38, 'classification lists 38 tables');
 select * from finish();

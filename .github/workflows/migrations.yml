@@ -107,15 +107,16 @@ jobs:
 
       # Third pass, "older project": give the database the legacy open default
       # privileges, then re-apply the grant migrations over them (061 re-grants the
-      # credential tables table-wide, 063 then narrows them again, exactly as the
-      # migrations run in order) and re-run the suite. Proves the migrations
+      # credential tables table-wide, 063 then narrows them again, and 065 re-grants the
+      # deletion-signal table that 061 predates — exactly as the migrations run in order) and re-run the suite. Proves the migrations
       # converge an over-granted project to the same least-privilege state, not only
       # a fresh one. The mode marker is asserted absent first, so this pass tests the
       # real grants. Last step: it leaves the database modified.
-      - name: Database tests (061 + 063 re-applied over legacy open grants)
+      - name: Database tests (061 + 063 + 065 re-applied over legacy open grants)
         run: |
           bash supabase/ci/apply-sql.sh supabase/ci/assert-real-grants-mode.sql
           bash supabase/ci/apply-sql.sh supabase/ci/legacy-open-grants.sql
           bash supabase/ci/apply-sql.sh supabase/migrations/061_data_api_grants.sql
           bash supabase/ci/apply-sql.sh supabase/migrations/063_credential_column_privileges.sql
+          bash supabase/ci/apply-sql.sh supabase/migrations/065_realtime_deletion_signals.sql
           supabase test db --local

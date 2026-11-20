@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { useLocale, useTranslations } from "next-intl";
 import { getDateLocale } from "@/i18n/date-locale";
 import { notificationText } from "@/lib/notifications/notification-text";
+import { DELETION_CHANGES, deletionFor } from "@/lib/realtime/deletions";
 
 // Icon per notification type. Only one type exists today
 // (conversation_assigned) but this keeps future types a one-line add.
@@ -101,14 +102,18 @@ export default function NotificationsPage() {
               prev?.map((n) => (n.id === row.id ? { ...n, ...row } : n)) ??
               prev,
             );
-          } else if (payload.eventType === "DELETE") {
-            const oldRow = payload.old as Partial<Notification>;
-            setNotifications(
-              (prev) => prev?.filter((n) => n.id !== oldRow.id) ?? prev,
-            );
           }
         },
       )
+      // A deleted notification arrives as a deletion signal (DELETE events are not
+      // published — migration 065); it reaches only the notified user.
+      .on("postgres_changes", DELETION_CHANGES, (payload) => {
+        const oldRow = deletionFor("notifications", payload) as Partial<Notification> | null;
+        if (!oldRow) return;
+        setNotifications(
+          (prev) => prev?.filter((n) => n.id !== oldRow.id) ?? prev,
+        );
+      })
       .subscribe();
 
     return () => {
