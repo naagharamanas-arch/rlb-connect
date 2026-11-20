@@ -124,7 +124,8 @@ export function basenameFromUrl(url: string): string {
     // Malformed escape sequence — keep the raw segment.
   }
 
-  const withoutStamp = decoded.replace(/^\d{10,}-/, "");
+  // A leading epoch / Meta id (10+ digits) or a 128-bit hex object token.
+  const withoutStamp = decoded.replace(/^(?:\d{10,}|[0-9a-f]{32})-/, "");
   return hasExtension(withoutStamp) ? sanitizeFilename(withoutStamp) : "";
 }
 

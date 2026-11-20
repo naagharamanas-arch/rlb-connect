@@ -17,6 +17,7 @@ import { ensureMediaHeaderHandle } from '@/lib/whatsapp/template-header-handle'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { getT } from '@/lib/i18n/translate'
+import { fetchWhatsAppConfig } from '@/lib/credentials/server'
 
 const t = getT('Api')
 
@@ -188,11 +189,7 @@ export async function POST(request: Request) {
       metaTemplateId = `dry-run-${crypto.randomUUID()}`
       metaStatus = 'PENDING'
     } else {
-      const { data: config, error: configError } = await supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('account_id', accountId)
-        .single()
+      const { data: config, error: configError } = await fetchWhatsAppConfig(accountId)
       if (configError || !config) {
         return NextResponse.json(
           {
@@ -220,7 +217,7 @@ export async function POST(request: Request) {
       // an actionable message (missing META_APP_ID, unreachable URL,
       // wrong type/size).
       try {
-        await ensureMediaHeaderHandle(payload, accessToken)
+        await ensureMediaHeaderHandle(payload, accessToken, accountId)
       } catch (e) {
         return NextResponse.json(
           { error: e instanceof Error ? e.message : t('templates.headerUploadFailed') },

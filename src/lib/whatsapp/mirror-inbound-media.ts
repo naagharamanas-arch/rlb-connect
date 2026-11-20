@@ -1,6 +1,8 @@
 import { downloadMedia } from "./meta-api";
 import { extensionForMime } from "@/lib/media/filename";
 import { buildMediaPath, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
+import { buildMediaRef } from "@/lib/storage/media-url";
+import { deriveObjectToken } from "@/lib/storage/media-server";
 
 /**
  * Copies inbound WhatsApp media into the `chat-media` bucket so it
@@ -11,8 +13,9 @@ import { buildMediaPath, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
  * the proxy route behind it re-fetched from Meta on every single view,
  * so an attachment quietly became unviewable a month after it arrived.
  * Outbound media never had the problem: the composer uploads to
- * `chat-media` (migration 023) and stores a durable public URL. This
- * puts inbound on the same footing.
+ * `chat-media` (migration 023) and stores a durable media reference
+ * (the bucket is private since migration 064; see @/lib/storage/media-url).
+ * This puts inbound on the same footing.
  *
  * Everything here is BEST EFFORT and returns `null` rather than
  * throwing. The caller is the Meta webhook, and a webhook that starts
@@ -31,12 +34,11 @@ export interface MirrorStorage {
       body: Uint8Array | Buffer,
       options: { contentType: string; cacheControl: string; upsert: boolean },
     ): Promise<{ error: { message: string } | null }>;
-    getPublicUrl(path: string): { data: { publicUrl: string } };
   };
 }
 
 /** Bucket the composer already writes to; inbound joins it. */
-export const MIRROR_BUCKET = "chat-media";
+export const MIRROR_BUCKET = "chat-media" as const;
 
 /**
  * Second path segment for mirrored inbound objects, so a bucket listing
@@ -97,7 +99,7 @@ function kindForMime(mimeType: string | null): string {
  * The object's filename inside the account folder. Pure, so the naming
  * rules can be tested without a Storage client.
  *
- * Prefixed with the media id, which makes the whole path deterministic:
+ * Prefixed with an id/token (the mirror passes none; its HMAC token is a separate path part), which makes the whole path deterministic:
  * a Meta redelivery of the same message rewrites the same object rather
  * than littering the bucket with a second copy. The id is stripped back
  * off when a download name is derived, because `basenameFromUrl`
@@ -111,7 +113,8 @@ function kindForMime(mimeType: string | null): string {
  * `whatsapp-image-<epoch>` — the latter truncates.
  */
 export function mirrorFileName(args: {
-  mediaId: string;
+  /** Optional leading id. The mirror passes none: its unguessable token is a separate path part. */
+  mediaId?: string;
   mimeType: string | null;
   fileName?: string | null;
   messageTimestamp?: string | number | null;
@@ -128,7 +131,8 @@ export function mirrorFileName(args: {
     .pop()!
     .replace(/\.[^.]+$/, "")
     .trim();
-  if (stem) return `${mediaId}-${stem}.${ext}`;
+  const prefix = mediaId ? `${mediaId}-` : "";
+  if (stem) return `${prefix}${stem}.${ext}`;
 
   // Otherwise synthesise. The message timestamp is in the name so that
   // saving two photos out of one thread doesn't produce two files with
@@ -136,13 +140,13 @@ export function mirrorFileName(args: {
   // path stays deterministic across a redelivery.
   const kind = kindForMime(mimeType);
   const stamp = String(messageTimestamp ?? "").replace(/\D/g, "");
-  return `${mediaId}-${stamp ? `${kind}-${stamp}` : kind}.${ext}`;
+  return `${prefix}${stamp ? `${kind}-${stamp}` : kind}.${ext}`;
 }
 
 /**
  * Download the bytes from Meta and put them in `chat-media`.
  *
- * @returns the durable public URL, or `null` if the mirror was skipped
+ * @returns the durable media reference (`/api/media/chat-media/...`), or `null` if the mirror was skipped
  *          or failed — in which case the caller must fall back to the
  *          proxy URL.
  */
@@ -196,8 +200,12 @@ export async function mirrorInboundMedia(
       normalizeMimeType(contentType) ??
       "application/octet-stream";
 
+    // Unguessable, yet deterministic: the object name carries an HMAC of
+    // (account, Meta media id) instead of the raw media id, so the path cannot be
+    // derived from anything an outsider sees, and a redelivery still maps to
+    // the same object.
+    const token = deriveObjectToken(accountId, mediaId);
     const objectName = mirrorFileName({
-      mediaId,
       mimeType: uploadType,
       fileName,
       messageTimestamp,
@@ -205,7 +213,7 @@ export async function mirrorInboundMedia(
     // `null` suppresses buildMediaPath's wall-clock stamp: the media id
     // already makes this path unique AND stable, and it's the stability
     // that makes a redelivery idempotent rather than duplicative.
-    const path = buildMediaPath(accountId, objectName, null, MIRROR_FOLDER);
+    const path = buildMediaPath(accountId, objectName, null, MIRROR_FOLDER, token);
 
     // `upsert: true` for that same reason: on the rare Meta redelivery
     // the second pass rewrites byte-identical content at the same key
@@ -226,10 +234,7 @@ export async function mirrorInboundMedia(
       return null;
     }
 
-    const {
-      data: { publicUrl },
-    } = storage.from(MIRROR_BUCKET).getPublicUrl(path);
-    return publicUrl || null;
+    return buildMediaRef(MIRROR_BUCKET, path);
   } catch (error) {
     console.warn(
       `[mirror-media] could not mirror ${mediaId}:`,

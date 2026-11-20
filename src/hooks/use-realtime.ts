@@ -4,6 +4,7 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Message, Conversation } from "@/types";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { DELETION_CHANGES, parseDeletionSignal } from "@/lib/realtime/deletions";
 
 interface RealtimeEvent<T> {
   eventType: "INSERT" | "UPDATE" | "DELETE";
@@ -68,6 +69,26 @@ export function useRealtime({
           });
         }
       )
+      // DELETE events are not published (migration 065: Realtime never RLS-filters them);
+      // a deleted message / conversation arrives as a tenant-scoped deletion signal and is
+      // delivered to the same handlers as a DELETE event, so consumers need no changes.
+      .on("postgres_changes", DELETION_CHANGES, (payload) => {
+        const signal = parseDeletionSignal(payload);
+        if (!signal) return;
+        if (signal.table === "messages") {
+          onMessageRef.current?.({
+            eventType: "DELETE",
+            new: {} as Message,
+            old: signal.old as Partial<Message>,
+          });
+        } else if (signal.table === "conversations") {
+          onConversationRef.current?.({
+            eventType: "DELETE",
+            new: {} as Conversation,
+            old: signal.old as Partial<Conversation>,
+          });
+        }
+      })
       .subscribe((status) => {
         setIsConnected(status === "SUBSCRIBED");
       });

@@ -55,3 +55,19 @@ describe("MEDIA_MAX_BYTES_BY_KIND", () => {
     expect(MEDIA_MAX_BYTES_BY_KIND.document).toBe(16 * 1024 * 1024);
   });
 });
+
+describe("buildMediaPath with an unguessable token", () => {
+  it("replaces the timestamp with the token and keeps the account folder", () => {
+    const token = "0123456789abcdef0123456789abcdef";
+    const path = buildMediaPath(ACCOUNT, "photo.png", null, undefined, token);
+    expect(path).toBe(`account-${ACCOUNT}/${token}-photo.png`);
+    expect(path.split("/")[0]).toBe(`account-${ACCOUNT}`);
+  });
+
+  it("supports a subfolder and ignores the timestamp when a token is given", () => {
+    const token = "f".repeat(32);
+    const path = buildMediaPath(ACCOUNT, "a.pdf", 1700000000000, "inbound", token);
+    expect(path).toBe(`account-${ACCOUNT}/inbound/${token}-a.pdf`);
+    expect(path).not.toContain("1700000000000");
+  });
+});

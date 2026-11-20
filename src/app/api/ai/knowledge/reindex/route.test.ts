@@ -34,6 +34,8 @@ vi.mock('@/lib/auth/account', () => ({
   }),
 }))
 
+vi.mock('@/lib/credentials/server', () => ({ credentialsDb: () => ({}) }))
+
 vi.mock('@/lib/ai/config', () => ({
   loadEmbeddingsKey: async () => ({ key: 'sk-embed', corrupt: h.corrupt }),
 }))

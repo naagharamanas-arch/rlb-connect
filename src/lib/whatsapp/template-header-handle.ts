@@ -2,6 +2,8 @@ import { uploadResumableMedia } from '@/lib/whatsapp/meta-api'
 import { MEDIA_HEADER_SPECS, isMediaHeaderKind } from '@/lib/whatsapp/media-header-types'
 import type { TemplatePayload } from '@/lib/whatsapp/template-validators'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
+import { isMediaRef } from '@/lib/storage/media-url'
+import { downloadStoredMedia, MediaReferenceError } from '@/lib/storage/media-server'
 import { getT } from '@/lib/i18n/translate'
 
 /**
@@ -28,6 +30,8 @@ const unreachableMessage = () => t('headerUrlUnreachable')
 export async function ensureMediaHeaderHandle(
   payload: TemplatePayload,
   accessToken: string,
+  /** Submitting account — authorises a private-bucket header reference. */
+  accountId?: string,
 ): Promise<void> {
   const kind = payload.header_type
   if (!isMediaHeaderKind(kind)) return
@@ -41,40 +45,54 @@ export async function ensureMediaHeaderHandle(
     throw new Error(t('metaAppIdRequired'))
   }
 
-  // SSRF guard: `header_media_url` is caller-supplied (any authenticated
-  // member can submit a template) and the fetch below happens server-side,
-  // so refuse any destination that resolves to a private / loopback /
-  // link-local / reserved address. Same guard as the two other
-  // outbound-fetch call sites (see lib/webhooks/ssrf.ts) — matching the
-  // unreachable-host message keeps the failure from being an oracle.
-  if (!(await isDeliverableUrl(payload.header_media_url))) {
-    throw new Error(unreachableMessage())
+  let contentType: string
+  let bytes: Uint8Array
+
+  if (isMediaRef(payload.header_media_url)) {
+    // Our own private-bucket upload: read it straight from Storage (server-side,
+    // after an account-ownership check). No network fetch, so no SSRF surface.
+    try {
+      if (!accountId) throw new MediaReferenceError('A media reference requires an account')
+      const stored = await downloadStoredMedia(payload.header_media_url, accountId)
+      contentType = stored.contentType
+      bytes = stored.bytes
+    } catch {
+      throw new Error(unreachableMessage())
+    }
+  } else {
+    // SSRF guard: `header_media_url` is caller-supplied (any authenticated
+    // member can submit a template) and the fetch below happens server-side,
+    // so refuse any destination that resolves to a private / loopback /
+    // link-local / reserved address. Same guard as the two other
+    // outbound-fetch call sites (see lib/webhooks/ssrf.ts) — matching the
+    // unreachable-host message keeps the failure from being an oracle.
+    if (!(await isDeliverableUrl(payload.header_media_url))) {
+      throw new Error(unreachableMessage())
+    }
+
+    // Fetch the sample bytes (a manually-pasted public link).
+    let res: Response
+    try {
+      res = await fetch(payload.header_media_url, {
+        // Do NOT follow redirects — a public URL could 3xx-bounce to an
+        // internal address, defeating the guard above. Bound the request so
+        // a hung host can't tie up the template-submit handler.
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10_000),
+      })
+    } catch {
+      throw new Error(unreachableMessage())
+    }
+    if (!res.ok) {
+      throw new Error(t('headerUrlStatus', { kind, status: res.status }))
+    }
+    contentType = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+    bytes = new Uint8Array(await res.arrayBuffer())
   }
 
-  // Fetch the sample bytes (works for our uploaded chat-media URL and for
-  // a manually-pasted public link).
-  let res: Response
-  try {
-    res = await fetch(payload.header_media_url, {
-      // Do NOT follow redirects — a public URL could 3xx-bounce to an
-      // internal address, defeating the guard above. Bound the request so
-      // a hung host can't tie up the template-submit handler.
-      redirect: 'manual',
-      signal: AbortSignal.timeout(10_000),
-    })
-  } catch {
-    throw new Error(unreachableMessage())
-  }
-  if (!res.ok) {
-    throw new Error(t('headerUrlStatus', { kind, status: res.status }))
-  }
-
-  const contentType = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
   if (contentType && !spec.mimeTypes.includes(contentType)) {
     throw new Error(t('headerWrongType', { kind, formats: spec.formats, contentType }))
   }
-
-  const bytes = new Uint8Array(await res.arrayBuffer())
   if (bytes.byteLength === 0) {
     throw new Error(t('headerEmpty', { kind }))
   }

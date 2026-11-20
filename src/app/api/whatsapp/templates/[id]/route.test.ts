@@ -95,6 +95,17 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(async () => supabaseMock),
 }))
 
+// The route reads credentials through the server-only reader, not the
+// RLS-scoped client: route the reader to the same fixture rows.
+vi.mock('@/lib/credentials/server', () => ({
+  fetchWhatsAppConfig: vi.fn(async () => {
+    const b = supabaseMock.from('whatsapp_config') as unknown as {
+      maybeSingle: () => Promise<unknown>
+    }
+    return b.maybeSingle()
+  }),
+}))
+
 vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: vi.fn(() => 'plaintext-token'),
   encrypt: vi.fn(() => 'enc-token'),

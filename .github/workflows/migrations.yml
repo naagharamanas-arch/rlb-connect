@@ -69,3 +69,54 @@ jobs:
       # just the absence of an error.
       - name: Verify the resulting schema
         run: supabase db query --local --file supabase/ci/verify-schema.sql
+
+      # Behavioural cross-tenant isolation tests (pgTAP, supabase/tests/database).
+      # The step above proves the schema EXISTS; this proves it ISOLATES: for
+      # every table, role-gated RPC and storage bucket it checks that one tenant
+      # (or anon) cannot read, change or plant another tenant's data, with
+      # positive controls so a broken harness cannot pass vacuously. It runs
+      # only against this job's throw-away local database (--local); the suite
+      # also refuses to run if the database holds any non-test user. The two
+      # previously known, non-cross-tenant gaps (G1: missing Data API grants,
+      # F1: member-readable credential columns) are CLOSED and enforced as hard
+      # assertions; any failing assertion fails the job.
+      - name: Database tests (cross-tenant isolation)
+        run: |
+          bash supabase/ci/apply-sql.sh supabase/ci/assert-real-grants-mode.sql
+          supabase test db --local
+
+      # Second pass, "open grants": the same suite with the legacy open Data API
+      # grants emulated ON TOP of the real ones, so RLS is again the only barrier
+      # under test and a regression in a policy cannot hide behind the
+      # least-privilege grants from migration 061. The first pass above runs
+      # against the real grants, where every positive control proves an allowed
+      # operation actually works.
+      #
+      # The mode is switched by a marker SCHEMA (tests_open_grants), not by
+      # `ALTER DATABASE ... SET`: `supabase db query` connects as `postgres`, which
+      # is not a superuser here, so setting a database-level parameter fails with
+      # "permission denied to set parameter". The EXIT trap removes the marker even
+      # when the suite fails, and 005_grants_mode proves the switch works both ways.
+      # SQL files go through supabase/ci/apply-sql.sh (psql in the DB container)
+      # because `supabase db query --file` rejects multi-statement files.
+      - name: Database tests (RLS as the only barrier, open grants emulated)
+        run: |
+          trap 'bash supabase/ci/apply-sql.sh supabase/ci/disable-open-grants-mode.sql' EXIT
+          bash supabase/ci/apply-sql.sh supabase/ci/enable-open-grants-mode.sql
+          supabase test db --local
+
+      # Third pass, "older project": give the database the legacy open default
+      # privileges, then re-apply the grant migrations over them (061 re-grants the
+      # credential tables table-wide, 063 then narrows them again, and 065 re-grants the
+      # deletion-signal table that 061 predates — exactly as the migrations run in order) and re-run the suite. Proves the migrations
+      # converge an over-granted project to the same least-privilege state, not only
+      # a fresh one. The mode marker is asserted absent first, so this pass tests the
+      # real grants. Last step: it leaves the database modified.
+      - name: Database tests (061 + 063 + 065 re-applied over legacy open grants)
+        run: |
+          bash supabase/ci/apply-sql.sh supabase/ci/assert-real-grants-mode.sql
+          bash supabase/ci/apply-sql.sh supabase/ci/legacy-open-grants.sql
+          bash supabase/ci/apply-sql.sh supabase/migrations/061_data_api_grants.sql
+          bash supabase/ci/apply-sql.sh supabase/migrations/063_credential_column_privileges.sql
+          bash supabase/ci/apply-sql.sh supabase/migrations/065_realtime_deletion_signals.sql
+          supabase test db --local

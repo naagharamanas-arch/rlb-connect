@@ -1,3 +1,4 @@
+import { setCredentialsDbForTests } from '@/lib/credentials/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -142,7 +143,7 @@ interface PlanWrites {
 }
 
 function planDb(fx: PlanFixture, writes: PlanWrites = {}): SupabaseClient {
-  return {
+  const fake = {
     from(table: string) {
       let range: [number, number] | null = null;
       const b: Record<string, unknown> = {
@@ -167,7 +168,12 @@ function planDb(fx: PlanFixture, writes: PlanWrites = {}): SupabaseClient {
           return b;
         },
         maybeSingle: async () => ({
-          data: fx.broadcast === undefined ? null : fx.broadcast,
+          data:
+            table === 'whatsapp_config'
+              ? (fx.config === undefined ? null : fx.config)
+              : fx.broadcast === undefined
+                ? null
+                : fx.broadcast,
           error: null,
         }),
         single: async () => ({
@@ -194,6 +200,9 @@ function planDb(fx: PlanFixture, writes: PlanWrites = {}): SupabaseClient {
       return b;
     },
   } as unknown as SupabaseClient;
+  // The send path reads the WhatsApp token via the server-only reader.
+  setCredentialsDbForTests(fake);
+  return fake;
 }
 
 const BROADCAST = {

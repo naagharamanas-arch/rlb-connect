@@ -8,8 +8,10 @@
  *      the bytes to a request carrying the account's access token, so the
  *      browser can't reach them on its own.
  *
- *   2. OUTBOUND — a public `chat-media` bucket URL (migration 023). Plain
- *      https that the browser fetches and caches like any other image.
+ *   2. OUTBOUND / MIRRORED — a private-bucket media reference
+ *      (`/api/media/chat-media/...`, see @/lib/storage/media-url): same-origin,
+ *      cookie-authenticated, redirected to a short-lived signed URL. (An external
+ *      https link a user pasted is fetched straight through.)
  *
  * The thumbnail, the lightbox and a download all want the same bytes. For
  * (1) that would otherwise be three separate multi-MB round trips through
@@ -20,6 +22,8 @@
  * eviction can never yank a URL out from under a mounted `<img>` — an
  * object URL keeps its blob's data alive by itself.
  */
+
+import { isMediaRef } from "@/lib/storage/media-url";
 
 /** Prefix of the auth-gated proxy — these need a credentialed fetch. */
 const PROXY_PREFIX = "/api/whatsapp/media/";
@@ -61,7 +65,9 @@ export class MediaResponseError extends Error {
 
 /** True for inbound media that has to be pulled through our proxy. */
 export function isProxiedMediaUrl(url: string): boolean {
-  return url.startsWith(PROXY_PREFIX);
+  // Inbound proxy (`/api/whatsapp/media/<id>`) or a private-bucket reference
+  // (`/api/media/<bucket>/...`): both are same-origin, cookie-authenticated.
+  return url.startsWith(PROXY_PREFIX) || isMediaRef(url);
 }
 
 function remember(url: string, blob: Blob): void {

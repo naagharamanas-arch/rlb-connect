@@ -3,7 +3,13 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     tsconfigPaths: true,
-    alias: { "@app-messages": new URL("./messages/en.json", import.meta.url).pathname },
+    alias: {
+      "@app-messages": new URL("./messages/en.json", import.meta.url).pathname,
+      // `import "server-only"` is resolved by Next's own compiler alias in builds
+      // (it errors if a client bundle reaches it). Unit tests run in plain Node,
+      // where the package is not installed, so point it at an empty module.
+      "server-only": new URL("./src/lib/test-utils/server-only-stub.ts", import.meta.url).pathname,
+    },
   },
   test: {
     environment: "node",

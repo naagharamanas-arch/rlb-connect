@@ -11,6 +11,7 @@ import {
   type PresenceStatus,
   type StoredPresence,
 } from "@/lib/presence";
+import { DELETION_CHANGES, deletionFor } from "@/lib/realtime/deletions";
 
 // How often the viewer re-derives presence locally. The online→offline
 // transition fires NO database event (it's just the clock passing the
@@ -91,17 +92,6 @@ export function usePresence(enabled = true): UsePresenceResult {
           filter: `account_id=eq.${accountId}`,
         },
         (payload) => {
-          if (payload.eventType === "DELETE") {
-            const old = payload.old as { user_id?: string };
-            if (!old.user_id) return;
-            setRows((prev) => {
-              if (!prev.has(old.user_id!)) return prev;
-              const next = new Map(prev);
-              next.delete(old.user_id!);
-              return next;
-            });
-            return;
-          }
           applyRow(
             payload.new as {
               user_id: string;
@@ -111,6 +101,21 @@ export function usePresence(enabled = true): UsePresenceResult {
           );
         },
       )
+      // A removed member's presence row arrives as a deletion signal (DELETE events are
+      // not published — migration 065). Signals are tenant-scoped by RLS; the account
+      // check is belt and braces.
+      .on("postgres_changes", DELETION_CHANGES, (payload) => {
+        const old = deletionFor("member_presence", payload) as
+          | { user_id?: string; account_id?: string }
+          | null;
+        if (!old?.user_id || (old.account_id && old.account_id !== accountId)) return;
+        setRows((prev) => {
+          if (!prev.has(old.user_id!)) return prev;
+          const next = new Map(prev);
+          next.delete(old.user_id!);
+          return next;
+        });
+      })
       .subscribe();
 
     supabase
