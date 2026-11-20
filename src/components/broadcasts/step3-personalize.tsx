@@ -1,5 +1,6 @@
 'use client';
 
+import { isMediaRef } from '@/lib/storage/media-url';
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Contact, CustomField, MessageTemplate } from '@/types';
@@ -42,6 +43,8 @@ function isMediaHeaderType(value: unknown): value is MediaHeaderType {
 }
 
 function isValidHttpUrl(value: string): boolean {
+  // A private-bucket media reference uploaded through the app is valid too.
+  if (isMediaRef(value)) return true;
   try {
     const u = new URL(value);
     return u.protocol === 'http:' || u.protocol === 'https:';

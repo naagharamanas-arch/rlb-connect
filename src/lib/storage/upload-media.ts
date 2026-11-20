@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
 import { getT } from "@/lib/i18n/translate";
+import { buildMediaRef, PRIVATE_MEDIA_BUCKETS, type PrivateMediaBucket } from "@/lib/storage/media-url";
 
 const t = getT("LibErrors");
 
@@ -8,7 +9,11 @@ const t = getT("LibErrors");
  * account-scoped path convention introduced in migration 020
  * (`flow-media`) and reused by migration 023 (`chat-media`):
  *
- *   <bucket>/account-<account_id>/<timestamp>-<basename>.<ext>
+ *   <bucket>/account-<account_id>/<random token>-<basename>.<ext>
+ *
+ * Both buckets are PRIVATE: an upload returns a media reference
+ * (`/api/media/<bucket>/<path>`, see ./media-url), never a bucket URL, and object
+ * names carry an unguessable 128-bit token.
  *
  * The first path segment (`account-<uuid>`) is what the bucket's RLS
  * write policies match on, so every caller MUST go through here rather
@@ -61,6 +66,12 @@ export function buildMediaPath(
   fileName: string,
   now: number | null = Date.now(),
   subfolder?: string,
+  /**
+   * Unguessable token that replaces the timestamp prefix. Uploads from the browser
+   * pass a random one; the server-side inbound mirror passes a deterministic
+   * HMAC-derived one so a redelivery rewrites the same object.
+   */
+  token?: string,
 ): string {
   // Only treat the trailing segment as an extension when there's a real
   // one — a bare name like "README" has no extension and falls back to
@@ -75,13 +86,17 @@ export function buildMediaPath(
   const dir = subfolder
     ? `account-${accountId}/${subfolder}`
     : `account-${accountId}`;
-  const stamp = now === null ? "" : `${now}-`;
+  const stamp = token ? `${token}-` : now === null ? "" : `${now}-`;
   return `${dir}/${stamp}${safeBase}.${ext}`;
 }
 
 export interface UploadAccountMediaResult {
-  /** Public URL Meta can fetch at send time. */
-  publicUrl: string;
+  /**
+   * Stored media reference (`/api/media/<bucket>/<path>`). Not a bucket URL: the
+   * bucket is private. Browsers load it with the session cookie; the server signs
+   * a short-lived URL for Meta at send time.
+   */
+  url: string;
   /** Storage object path (account-scoped). */
   path: string;
 }
@@ -95,7 +110,7 @@ export interface UploadAccountMediaResult {
  * feature); `MEDIA_MAX_BYTES` is exported for the common case.
  */
 export async function uploadAccountMedia(
-  bucket: string,
+  bucket: PrivateMediaBucket,
   file: File,
 ): Promise<UploadAccountMediaResult> {
   const supabase = createClient();
@@ -120,7 +135,13 @@ export async function uploadAccountMedia(
     throw new Error(t("upload.accountUnresolved"));
   }
 
-  const path = buildMediaPath(profile.account_id as string, file.name);
+  if (!(PRIVATE_MEDIA_BUCKETS as readonly string[]).includes(bucket)) {
+    throw new Error(`Unsupported media bucket: ${bucket}`);
+  }
+  // 128 random bits: the object name is unguessable even though the account id
+  // is not a secret.
+  const token = crypto.randomUUID().replace(/-/g, "");
+  const path = buildMediaPath(profile.account_id as string, file.name, null, undefined, token);
   const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, {
     cacheControl: "3600",
     upsert: false,
@@ -128,11 +149,7 @@ export async function uploadAccountMedia(
   });
   if (upErr) throw new Error(upErr.message);
 
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from(bucket).getPublicUrl(path);
-
-  return { publicUrl, path };
+  return { url: buildMediaRef(bucket, path), path };
 }
 
 /**
@@ -146,7 +163,7 @@ export async function uploadAccountMedia(
  * delete is a storage nit, not something to surface to the user).
  */
 export async function deleteAccountMedia(
-  bucket: string,
+  bucket: PrivateMediaBucket,
   path: string,
 ): Promise<void> {
   const supabase = createClient();

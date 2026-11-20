@@ -345,6 +345,7 @@ export async function sendMessageToConversation(
       const result = await sendTemplateMessage({
         phoneNumberId: config.phone_number_id,
         accessToken,
+        mediaAccountId: accountId,
         to: phone,
         templateName: templateName!,
         language: sendLanguage,
@@ -359,6 +360,7 @@ export async function sendMessageToConversation(
       const result = await sendMediaMessage({
         phoneNumberId: config.phone_number_id,
         accessToken,
+        mediaAccountId: accountId,
         to: phone,
         kind: messageType as MediaKind,
         link: mediaUrl!,

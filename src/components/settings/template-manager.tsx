@@ -509,8 +509,8 @@ export function TemplateManager() {
     }
     setUploadingHeader(true);
     try {
-      const { publicUrl } = await uploadAccountMedia('chat-media', file);
-      setForm((f) => ({ ...f, header_media_url: publicUrl }));
+      const { url: mediaRef } = await uploadAccountMedia('chat-media', file);
+      setForm((f) => ({ ...f, header_media_url: mediaRef }));
       toast.success(t('toastUploadSuccess'));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('toastUploadFailed'));

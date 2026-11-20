@@ -15,6 +15,7 @@
  * ("button #3 has no `text`" beats "constraint violated").
  */
 
+import { parseMediaRef } from '@/lib/storage/media-url';
 import type {
   MessageTemplate,
   TemplateButton,
@@ -185,7 +186,9 @@ export function validateHeader(
       t('mediaHeaderRequiresSource', { type: header_type }),
     );
   }
-  if (header_media_url) {
+  // A private-bucket media reference (uploaded through the app) is accepted as-is;
+  // everything else must be an http(s) URL.
+  if (header_media_url && !parseMediaRef(header_media_url)) {
     try {
       const u = new URL(header_media_url);
       if (u.protocol !== 'https:' && u.protocol !== 'http:') {

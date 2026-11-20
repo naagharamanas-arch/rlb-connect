@@ -64,6 +64,8 @@ interface PlannedRecipient {
 
 export interface BroadcastPlan {
   broadcastId: string;
+  /** Sending account; authorises private-bucket template header media at send time. */
+  accountId: string;
   templateName: string;
   templateLanguage: string;
   phoneNumberId: string;
@@ -236,6 +238,7 @@ export async function createBroadcast(
 
   return {
     broadcastId,
+    accountId,
     templateName,
     templateLanguage: resolvedTemplate.language,
     phoneNumberId: config.phone_number_id,
@@ -274,6 +277,7 @@ export async function deliverBroadcast(
         const result = await sendTemplateMessage({
           phoneNumberId: plan.phoneNumberId,
           accessToken: plan.accessToken,
+          mediaAccountId: plan.accountId,
           to: variant,
           templateName: plan.templateName,
           language: plan.templateLanguage,

@@ -80,7 +80,11 @@ export function serializeConversation(conv: Conversation): ApiConversation {
 }
 
 /** Project a `messages` row into the public shape. */
-export function serializeMessage(m: Message): ApiMessage {
+export function serializeMessage(
+  m: Message,
+  /** Pre-signed `media_url` (see signMediaForApi); defaults to the stored value. */
+  mediaUrl: string | null = m.media_url ?? null,
+): ApiMessage {
   return {
     id: m.id,
     conversation_id: m.conversation_id,
@@ -89,7 +93,7 @@ export function serializeMessage(m: Message): ApiMessage {
     sender_type: m.sender_type,
     content_type: m.content_type,
     content_text: m.content_text ?? null,
-    media_url: m.media_url ?? null,
+    media_url: mediaUrl,
     template_name: m.template_name ?? null,
     whatsapp_message_id: m.message_id ?? null,
     status: m.status,

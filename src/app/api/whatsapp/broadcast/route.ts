@@ -188,6 +188,7 @@ export async function POST(request: Request) {
           const result = await sendTemplateMessage({
             phoneNumberId: config.phone_number_id,
             accessToken,
+            mediaAccountId: accountId,
             to: variant,
             templateName: template_name,
             language: resolvedTemplate.language,
