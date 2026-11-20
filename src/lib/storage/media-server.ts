@@ -1,3 +1,5 @@
+import 'server-only'
+
 import { createHmac } from 'node:crypto'
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'

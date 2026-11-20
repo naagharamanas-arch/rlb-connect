@@ -145,10 +145,11 @@ const SERVICE_ROLE_MODULES: Record<string, string> = {
 }
 
 describe('service-role client construction', () => {
-  const FILES = walk(SRC, (n) => /\.(ts|tsx)$/.test(n) && !/\.test\.(ts|tsx)$/.test(n)).map((p) => ({
-    path: posix(process.cwd(), p),
-    text: readFileSync(p, 'utf8'),
-  }))
+  // src/lib/test-utils holds test-only helpers (e.g. the import-graph scanner, which
+  // names the key in a regex); they are never bundled or run in production.
+  const FILES = walk(SRC, (n) => /\.(ts|tsx)$/.test(n) && !/\.test\.(ts|tsx)$/.test(n))
+    .map((p) => ({ path: posix(process.cwd(), p), text: readFileSync(p, 'utf8') }))
+    .filter((f) => !f.path.startsWith('src/lib/test-utils/'))
 
   it('only allowlisted modules read SUPABASE_SERVICE_ROLE_KEY', () => {
     const offenders = FILES.filter((f) => /SUPABASE_SERVICE_ROLE_KEY/.test(f.text))

@@ -11,6 +11,7 @@
 
 import { isBusinessScopedUserId } from './wa-identity'
 import { getT } from '@/lib/i18n/translate'
+import { INTERACTIVE_LIMITS } from './interactive-limits'
 import { resolveMediaLinkForMeta } from '@/lib/storage/media-server'
 
 const ti = getT('Validation.interactive')
@@ -947,24 +948,9 @@ export async function sendTypingIndicator(
 // limits BEFORE the network call so the failure mode is a
 // developer-facing error rather than a customer-facing one.
 
-/**
- * Meta limits for interactive messages, hard-coded so violations
- * fail at build/save time rather than as a 400 from the Meta API
- * mid-conversation. See:
- *   https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-reply-buttons-messages
- *   https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-list-messages
- */
-export const INTERACTIVE_LIMITS = {
-  maxButtons: 3,
-  buttonTitleMaxLength: 20,
-  maxListSections: 10,
-  maxListRowsTotal: 10,
-  listRowTitleMaxLength: 24,
-  listRowDescriptionMaxLength: 72,
-  bodyMaxLength: 1024,
-  footerMaxLength: 60,
-  headerTextMaxLength: 60,
-} as const
+// Meta's interactive-message limits live in ./interactive-limits (client-safe);
+// re-exported here so the senders and existing imports keep working.
+export { INTERACTIVE_LIMITS } from './interactive-limits'
 
 export interface InteractiveButton {
   /** Stable id sent back in the webhook when tapped (≤ 256 chars). */

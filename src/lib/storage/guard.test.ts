@@ -1,3 +1,4 @@
+import { clientPathsTo, isClientEntry, type SourceFile } from '@/lib/test-utils/import-graph'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -67,12 +68,9 @@ describe('private media buckets', () => {
     expect(f.text).toMatch(/crypto\.randomUUID\(\)/)
   })
 
-  it('browser modules never import the server media module', () => {
-    const isClient = (f: { path: string; text: string }) =>
-      /^\s*['"]use client['"]/m.test(f.text) || f.path.startsWith('src/components/') || f.path.startsWith('src/hooks/')
-    const offenders = FILES.filter(isClient)
-      .filter((f) => /from\s+['"]@\/lib\/storage\/media-server['"]/.test(f.text))
-      .map((f) => f.path)
-    expect(offenders).toEqual([])
+  it('no browser module reaches the server media module, directly or transitively', () => {
+    // Entries: every "use client" module, hook, and anything under src/components.
+    const isEntry = (f: SourceFile) => isClientEntry(f) || f.path.startsWith('src/components/')
+    expect(clientPathsTo(FILES, (f) => f.path === 'src/lib/storage/media-server.ts', isEntry)).toEqual([])
   })
 })

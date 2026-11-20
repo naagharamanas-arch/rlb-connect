@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
+import { clientPathsTo, isClientEntry, type SourceFile } from '@/lib/test-utils/import-graph'
 import { CREDENTIAL_COLUMNS } from './server'
 
 // ---------------------------------------------------------------------------
@@ -112,15 +113,10 @@ describe('F1: credential columns are read only on the server', () => {
     expect(stale).toEqual([])
   })
 
-  it('browser modules never import the server-only credentials module', () => {
-    const isClient = (f: { path: string; text: string }) =>
-      /^\s*['"]use client['"]/m.test(f.text) ||
-      f.path.startsWith('src/components/') ||
-      f.path.startsWith('src/hooks/')
-    const offenders = FILES.filter(isClient)
-      .filter((f) => /from\s+['"]@\/lib\/credentials\/server['"]/.test(f.text))
-      .map((f) => f.path)
-    expect(offenders).toEqual([])
+  it('no browser module reaches the server-only credentials module, directly or transitively', () => {
+    // Entries: every "use client" module, hook, and anything under src/components.
+    const isEntry = (f: SourceFile) => isClientEntry(f) || f.path.startsWith('src/components/')
+    expect(clientPathsTo(FILES, (f) => f.path === 'src/lib/credentials/server.ts', isEntry)).toEqual([])
   })
 
   it('browser modules never select a credential column or * from a credential table', () => {
