@@ -191,11 +191,16 @@ begin
   -- suite must run against THOSE grants, not an emulated open default that would
   -- mask a missing one. So: emulate only while authenticated holds no table
   -- privilege at all (the pre-061 deny-by-default state).
-  -- Open mode (CI second pass): `alter database ... set tests.open_grants = 'on'`
-  -- forces the emulation even on top of the real grants, so RLS is again tested
-  -- as the ONLY barrier (a regression in RLS cannot hide behind a grant).
+  -- Open mode (CI second pass): the presence of the schema `tests_open_grants`
+  -- (created by supabase/ci/enable-open-grants-mode.sql, dropped again by
+  -- disable-open-grants-mode.sql) forces the emulation even on top of the real
+  -- grants, so RLS is again tested as the ONLY barrier (a regression in RLS cannot
+  -- hide behind a grant). A marker OBJECT is used on purpose: the `postgres` role
+  -- that `supabase db query` connects as is not a superuser, so
+  -- `ALTER DATABASE ... SET tests.open_grants` is refused ("permission denied to
+  -- set parameter"), while creating a schema in its own database is allowed.
   if has_table_privilege('authenticated', 'public.contacts', 'SELECT')
-     and coalesce(current_setting('tests.open_grants', true), '') <> 'on' then
+     and to_regnamespace('tests_open_grants') is null then
     return;
   end if;
   perform set_config('tests.emulated', 'on', true);
