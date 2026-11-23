@@ -57,6 +57,8 @@ export const ROUTE_REGISTRY: Record<string, RouteRule> = {
   'api/flows/cron/route.ts': { auth: ['cron'] , serviceRole: true},
   'api/flows/route.ts': { auth: ['role'], roles: ['agent'] , serviceRole: true},
   'api/flows/templates/route.ts': { auth: ['session'] },
+  'api/health/live/route.ts': { auth: ['public'], reason: 'Liveness probe for the container healthcheck: fixed {status} body, no dependencies, no data' },
+  'api/health/ready/route.ts': { auth: ['public'], reason: 'Readiness probe: pass/fail plus variable NAMES only (never values); no tenant data' },
   'api/invitations/[token]/peek/route.ts': { auth: ['public'], reason: 'Invitation preview: returns a fixed-shape JSON for a secret token only; no account data without the token' },
   'api/invitations/[token]/redeem/route.ts': { auth: ['session'] },
   'api/media/[bucket]/[...path]/route.ts': { auth: ['member'] },

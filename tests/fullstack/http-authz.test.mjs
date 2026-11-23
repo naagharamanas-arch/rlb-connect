@@ -330,6 +330,20 @@ describe('public routes reveal nothing', () => {
     }
   })
 
+  it('health probes expose only a status, never tenant data or values', async () => {
+    for (const principal of ['anon', 'owner']) {
+      const live = await call({ world, principal, path: '/api/health/live' })
+      assert.equal(live.status, 200)
+      assert.deepEqual(JSON.parse(live.text), { status: 'ok' })
+      const ready = await call({ world, principal, path: '/api/health/ready' })
+      assert.ok([200, 503].includes(ready.status), `${principal} -> ${ready.status}`)
+      const keys = Object.keys(JSON.parse(ready.text))
+      assert.ok(keys.every((k) => ['status', 'config', 'supabase'].includes(k)), keys.join())
+      assert.ok(!ready.text.includes(MARKER))
+      assert.ok(!ready.text.includes(world.accounts.a))
+    }
+  })
+
   it('auth callback without a code never errors the server', async () => {
     const r = await call({ world, path: '/auth/callback' })
     assert.ok(r.status < 500, `status ${r.status}`)

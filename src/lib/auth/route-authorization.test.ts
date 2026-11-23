@@ -110,6 +110,8 @@ describe('route registry', () => {
   it('public routes are explicit, justified and never use the service role', () => {
     const publics = Object.entries(ROUTE_REGISTRY).filter(([, v]) => v.auth.includes('public'))
     expect(publics.map(([p]) => p).sort()).toEqual([
+      'api/health/live/route.ts',
+      'api/health/ready/route.ts',
       'api/invitations/[token]/peek/route.ts',
       'auth/callback/route.ts',
     ])

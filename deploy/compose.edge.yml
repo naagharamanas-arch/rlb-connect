@@ -1,0 +1,36 @@
+# Shared TLS edge for every stack on the host. Caddy terminates HTTPS
+# (automatic certificates) and routes by hostname to each app stack over the
+# external `edge` network. Create the network once: `docker network create edge`.
+#
+#   docker compose -p rlb-edge --env-file /srv/rlb/edge.env -f deploy/compose.edge.yml up -d
+#
+# edge.env needs: ACME_EMAIL, STAGING_HOST, STAGING_BASIC_AUTH_USER,
+# STAGING_BASIC_AUTH_HASH (generate with `caddy hash-password`; keep the
+# value in single quotes because bcrypt hashes contain `$`).
+#
+# Only the staging host is routed. The production block is added with the
+# production deployment, which needs its own approval.
+
+services:
+  caddy:
+    image: caddy:2
+    env_file:
+      - ${EDGE_ENV_FILE:?set EDGE_ENV_FILE to the server-side edge env file}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    networks:
+      - edge
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  edge:
+    external: true

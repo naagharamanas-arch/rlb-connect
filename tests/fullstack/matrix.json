@@ -885,6 +885,14 @@
    "reason": "private media: covered by storage.test.mjs"
   },
   {
+   "route": "api/health/live/route.ts",
+   "reason": "public by design: covered by http-authz \"public routes\" tests"
+  },
+  {
+   "route": "api/health/ready/route.ts",
+   "reason": "public by design: covered by http-authz \"public routes\" tests"
+  },
+  {
    "route": "api/invitations/[token]/peek/route.ts",
    "reason": "public by design: covered by http-authz \"public routes\" tests"
   },
