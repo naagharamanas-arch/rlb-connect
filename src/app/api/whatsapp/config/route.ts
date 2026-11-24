@@ -30,6 +30,7 @@ import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 import { resolveVerifyTokenForSave } from '@/lib/whatsapp/verify-token'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { getT } from '@/lib/i18n/translate'
+import { fetchWhatsAppConfig } from '@/lib/credentials/server'
 
 const t = getT('Api')
 
@@ -131,11 +132,7 @@ export async function GET() {
       )
     }
 
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('phone_number_id, waba_id, access_token, status')
-      .eq('account_id', accountId)
-      .maybeSingle()
+    const { data: config, error: configError } = await fetchWhatsAppConfig(accountId, 'phone_number_id, waba_id, access_token, status')
 
     if (configError) {
       console.error('Error fetching whatsapp_config:', configError)
@@ -389,11 +386,7 @@ export async function POST(request: Request) {
     // around), and we need the stored verify_token — the settings form
     // never shows it, so a save that leaves the field blank must keep it
     // rather than null it out.
-    const { data: existing } = await supabase
-      .from('whatsapp_config')
-      .select('id, registered_at, phone_number_id, verify_token')
-      .eq('account_id', accountId)
-      .maybeSingle()
+    const { data: existing } = await fetchWhatsAppConfig(accountId, 'id, registered_at, phone_number_id, verify_token')
 
     // Encrypt sensitive tokens before storing
     let encryptedAccessToken: string

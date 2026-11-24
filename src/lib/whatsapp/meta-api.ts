@@ -11,6 +11,8 @@
 
 import { isBusinessScopedUserId } from './wa-identity'
 import { getT } from '@/lib/i18n/translate'
+import { INTERACTIVE_LIMITS } from './interactive-limits'
+import { resolveMediaLinkForMeta } from '@/lib/storage/media-server'
 
 const ti = getT('Validation.interactive')
 
@@ -427,8 +429,14 @@ export interface SendMediaMessageArgs {
   accessToken: string
   to: string
   kind: MediaKind
-  /** Public URL Meta fetches at send time. */
+  /** URL Meta fetches at send time: an external URL, or a private-bucket media reference (signed here). */
   link: string
+  /**
+   * Account the sender belongs to. REQUIRED whenever `link` is a private-bucket
+   * media reference: it is checked against the object's account folder, and the
+   * send fails closed without it.
+   */
+  mediaAccountId?: string
   /** Optional caption — Meta caps at 1024 chars. Documents + images + videos accept it; audio does NOT. */
   caption?: string
   /** Document-only. Shown in the recipient's chat as the file name. Ignored for image/video/audio. */
@@ -451,8 +459,11 @@ export interface SendMediaMessageArgs {
 export async function sendMediaMessage(
   args: SendMediaMessageArgs,
 ): Promise<MetaSendResult> {
-  const { phoneNumberId, accessToken, to, kind, link, caption, filename, contextMessageId } = args
-  if (!link) throw new Error('sendMediaMessage requires a link.')
+  const { phoneNumberId, accessToken, to, kind, caption, filename, contextMessageId } = args
+  if (!args.link) throw new Error('sendMediaMessage requires a link.')
+  // A private-bucket media reference becomes a short-lived signed URL here, after
+  // an account-ownership check. External URLs pass through untouched.
+  const link = await resolveMediaLinkForMeta(args.link, args.mediaAccountId)
   const url = `${META_API_BASE}/${phoneNumberId}/messages`
 
   // Audio accepts neither caption nor filename per Meta's spec — adding
@@ -492,6 +503,8 @@ import {
 } from './template-send-builder'
 
 export interface SendTemplateMessageArgs {
+  /** See SendMediaMessageArgs.mediaAccountId — needed when the header media is a private-bucket reference. */
+  mediaAccountId?: string
   phoneNumberId: string
   accessToken: string
   to: string
@@ -555,12 +568,27 @@ export async function sendTemplateMessage(
   }
 
   if (template) {
-    const components = buildSendComponents(template, {
+    // Resolve private-bucket media references (header image/video/document) to
+    // short-lived signed URLs before Meta sees them. Fails closed without an
+    // account id; external URLs pass through.
+    const headerMediaUrl = messageParams?.headerMediaUrl
+      ? await resolveMediaLinkForMeta(messageParams.headerMediaUrl, args.mediaAccountId)
+      : undefined
+    const sendTemplate = template.header_media_url
+      ? {
+          ...template,
+          header_media_url: await resolveMediaLinkForMeta(
+            template.header_media_url,
+            args.mediaAccountId,
+          ),
+        }
+      : template
+    const components = buildSendComponents(sendTemplate, {
       // Legacy callers pass body values in `params`; fold them into
       // `messageParams.body` so the new path covers them too.
       body: messageParams?.body ?? params,
       headerText: messageParams?.headerText,
-      headerMediaUrl: messageParams?.headerMediaUrl,
+      headerMediaUrl,
       headerMediaId: messageParams?.headerMediaId,
       buttonParams: messageParams?.buttonParams,
     })
@@ -920,24 +948,9 @@ export async function sendTypingIndicator(
 // limits BEFORE the network call so the failure mode is a
 // developer-facing error rather than a customer-facing one.
 
-/**
- * Meta limits for interactive messages, hard-coded so violations
- * fail at build/save time rather than as a 400 from the Meta API
- * mid-conversation. See:
- *   https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-reply-buttons-messages
- *   https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-list-messages
- */
-export const INTERACTIVE_LIMITS = {
-  maxButtons: 3,
-  buttonTitleMaxLength: 20,
-  maxListSections: 10,
-  maxListRowsTotal: 10,
-  listRowTitleMaxLength: 24,
-  listRowDescriptionMaxLength: 72,
-  bodyMaxLength: 1024,
-  footerMaxLength: 60,
-  headerTextMaxLength: 60,
-} as const
+// Meta's interactive-message limits live in ./interactive-limits (client-safe);
+// re-exported here so the senders and existing imports keep working.
+export { INTERACTIVE_LIMITS } from './interactive-limits'
 
 export interface InteractiveButton {
   /** Stable id sent back in the webhook when tapped (≤ 256 chars). */

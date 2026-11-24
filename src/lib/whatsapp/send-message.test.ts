@@ -1,3 +1,4 @@
+import { setCredentialsDbForTests } from '@/lib/credentials/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -224,7 +225,7 @@ function sendPathDb(
     access_token: 'token',
   };
 
-  return {
+  const fake = {
     from(table: string) {
       const builder: Record<string, unknown> = {
         select: () => builder,
@@ -237,7 +238,10 @@ function sendPathDb(
           if (table === 'conversations') captured.conversation = row;
           return builder;
         },
-        maybeSingle: async () => ({ data: null, error: null }),
+        maybeSingle: async () => ({
+          data: table === 'whatsapp_config' ? config : null,
+          error: null,
+        }),
         single: async () => {
           if (table === 'conversations') {
             return { data: conversation, error: null };
@@ -258,6 +262,9 @@ function sendPathDb(
       return builder;
     },
   } as unknown as SupabaseClient;
+  // The send path reads the WhatsApp token via the server-only reader.
+  setCredentialsDbForTests(fake);
+  return fake;
 }
 
 const TEMPLATE_ROW = {

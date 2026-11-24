@@ -14,6 +14,7 @@ import {
   buildPage,
 } from '@/lib/api/v1/pagination';
 import { serializeMessage } from '@/lib/api/v1/conversations';
+import { signMediaForApi } from '@/lib/storage/media-server';
 import type { Message } from '@/types';
 
 export async function GET(
@@ -55,10 +56,15 @@ export async function GET(
       (data ?? []) as Array<{ created_at: string; id: string }>,
       limit
     );
-    return okList(
-      items.map((m) => serializeMessage(m as unknown as Message)),
-      nextCursor
+    // media_url may be a private-bucket reference: API consumers get a signed,
+    // time-limited URL instead (external URLs pass through).
+    const serialized = await Promise.all(
+      items.map(async (m) => {
+        const msg = m as unknown as Message;
+        return serializeMessage(msg, await signMediaForApi(msg.media_url ?? null, ctx.accountId));
+      })
     );
+    return okList(serialized, nextCursor);
   } catch (err) {
     return toApiErrorResponse(err);
   }

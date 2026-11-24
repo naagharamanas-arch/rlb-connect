@@ -10,9 +10,9 @@ lands.
 
 Instead, please report privately via one of:
 
-- [GitHub Security Advisories](https://github.com/ArnasDon/wacrm/security/advisories/new)
+- [GitHub Security Advisories](https://github.com/naagharamanas-arch/rlb-connect/security/advisories/new)
   (preferred — keeps the disclosure, fix, and CVE all in one place).
-- Email: `a.donauskas@hostinger.com` with `[CRM template security]` in the subject.
+- Email: `[CONFIRM: RLB Connect security contact email]` with `[RLB Connect security]` in the subject.
 
 Include, if you can:
 

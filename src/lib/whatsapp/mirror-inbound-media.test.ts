@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { deriveObjectToken } from "@/lib/storage/media-server";
 import {
   MIRROR_BUCKET,
   mirrorFileName,
@@ -153,13 +154,20 @@ describe("mirrorInboundMedia", () => {
 
     expect(uploads).toHaveLength(1);
     expect(uploads[0].bucket).toBe(MIRROR_BUCKET);
+    // Unguessable but deterministic: an HMAC token replaces the raw Meta media id,
+    // which an outsider could otherwise correlate with the path.
+    const token = deriveObjectToken(ACCOUNT, MEDIA_ID);
+    expect(token).toMatch(/^[0-9a-f]{32}$/);
     expect(uploads[0].path).toBe(
-      `account-${ACCOUNT}/inbound/${MEDIA_ID}-image-1754899200.jpg`,
+      `account-${ACCOUNT}/inbound/${token}-image-1754899200.jpg`,
     );
+    expect(uploads[0].path).not.toContain(MEDIA_ID);
     expect(uploads[0].options.contentType).toBe("image/jpeg");
+    // The bucket is private: what is stored is a media reference, not a bucket URL.
     expect(url).toBe(
-      `https://cdn.test/storage/chat-media/account-${ACCOUNT}/inbound/${MEDIA_ID}-image-1754899200.jpg`,
+      `/api/media/chat-media/account-${ACCOUNT}/inbound/${token}-image-1754899200.jpg`,
     );
+    expect(url).not.toMatch(/^https?:/);
   });
 
   it("writes the same path on a redelivery, so a retry can't orphan a copy", async () => {

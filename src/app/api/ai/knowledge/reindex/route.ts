@@ -5,6 +5,7 @@ import { loadEmbeddingsKey } from '@/lib/ai/config'
 import { ingestDocument } from '@/lib/ai/knowledge'
 import { AiError } from '@/lib/ai/types'
 import { getT } from '@/lib/i18n/translate'
+import { credentialsDb } from '@/lib/credentials/server'
 
 const t = getT('Api')
 
@@ -35,7 +36,7 @@ export async function POST() {
     }
 
     const { key: embeddingsApiKey, corrupt } = await loadEmbeddingsKey(
-      supabase,
+      credentialsDb(),
       accountId,
     )
     // The whole point of Reindex is usually to backfill embeddings — so

@@ -241,6 +241,7 @@ export async function engineSendMedia(
     const r = await sendMediaMessage({
       phoneNumberId,
       accessToken,
+      mediaAccountId: args.accountId,
       to: phone,
       kind: args.kind,
       link: args.link,

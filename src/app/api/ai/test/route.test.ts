@@ -35,6 +35,10 @@ vi.mock('@/lib/auth/account', () => ({
   }),
 }))
 
+vi.mock('@/lib/credentials/server', () => ({
+  fetchAiConfig: async () => ({ data: h.stored, error: null }),
+}))
+
 vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: (value: string) => `plain:${value}`,
 }))

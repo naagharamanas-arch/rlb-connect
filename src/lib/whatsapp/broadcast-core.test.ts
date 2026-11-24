@@ -1,3 +1,4 @@
+import { setCredentialsDbForTests } from '@/lib/credentials/server';
 import { describe, it, expect, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -69,6 +70,11 @@ function makeDb(rpcResult: { data: unknown; error: unknown }) {
                   data: { phone_number_id: 'pn-1', access_token: 'enc' },
                   error: null,
                 }),
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { phone_number_id: 'pn-1', access_token: 'enc' },
+                  error: null,
+                }),
             }),
           }),
         };
@@ -99,6 +105,8 @@ function makeDb(rpcResult: { data: unknown; error: unknown }) {
       return Promise.resolve(rpcResult);
     },
   } as unknown as SupabaseClient;
+  // createBroadcast reads the WhatsApp token via the server-only reader.
+  setCredentialsDbForTests(database);
   return { db: database, calls };
 }
 

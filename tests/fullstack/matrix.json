@@ -1,0 +1,904 @@
+{
+ "principals": [
+  "anon",
+  "viewer",
+  "agent",
+  "admin",
+  "owner",
+  "otherOwner",
+  "apiKey",
+  "apiKeyNoScope",
+  "otherApiKey"
+ ],
+ "cases": [
+  {
+   "route": "api/account/api-keys/[id]/route.ts",
+   "method": "DELETE",
+   "path": "/api/account/api-keys/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "admin"
+  },
+  {
+   "route": "api/account/api-keys/route.ts",
+   "method": "GET",
+   "path": "/api/account/api-keys",
+   "kind": "member"
+  },
+  {
+   "route": "api/account/api-keys/route.ts",
+   "method": "POST",
+   "path": "/api/account/api-keys",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/account/invitations/[id]/route.ts",
+   "method": "DELETE",
+   "path": "/api/account/invitations/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "admin"
+  },
+  {
+   "route": "api/account/invitations/route.ts",
+   "method": "GET",
+   "path": "/api/account/invitations",
+   "kind": "role",
+   "minRole": "admin"
+  },
+  {
+   "route": "api/account/invitations/route.ts",
+   "method": "POST",
+   "path": "/api/account/invitations",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/account/members/[userId]/route.ts",
+   "method": "DELETE",
+   "path": "/api/account/members/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "admin"
+  },
+  {
+   "route": "api/account/members/[userId]/route.ts",
+   "method": "PATCH",
+   "path": "/api/account/members/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/account/members/route.ts",
+   "method": "GET",
+   "path": "/api/account/members",
+   "kind": "member"
+  },
+  {
+   "route": "api/account/route.ts",
+   "method": "GET",
+   "path": "/api/account",
+   "kind": "member"
+  },
+  {
+   "route": "api/account/route.ts",
+   "method": "PATCH",
+   "path": "/api/account",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/account/transfer-ownership/route.ts",
+   "method": "POST",
+   "path": "/api/account/transfer-ownership",
+   "kind": "role",
+   "minRole": "owner",
+   "body": {}
+  },
+  {
+   "route": "api/ai/autoreply/[conversationId]/route.ts",
+   "method": "POST",
+   "path": "/api/ai/autoreply/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/ai/config/route.ts",
+   "method": "DELETE",
+   "path": "/api/ai/config",
+   "kind": "role",
+   "minRole": "admin"
+  },
+  {
+   "route": "api/ai/config/route.ts",
+   "method": "GET",
+   "path": "/api/ai/config",
+   "kind": "member"
+  },
+  {
+   "route": "api/ai/config/route.ts",
+   "method": "POST",
+   "path": "/api/ai/config",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/ai/draft/route.ts",
+   "method": "POST",
+   "path": "/api/ai/draft",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/ai/knowledge/[id]/route.ts",
+   "method": "DELETE",
+   "path": "/api/ai/knowledge/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "admin"
+  },
+  {
+   "route": "api/ai/knowledge/[id]/route.ts",
+   "method": "GET",
+   "path": "/api/ai/knowledge/00000000-0000-4000-8000-000000000000",
+   "kind": "member"
+  },
+  {
+   "route": "api/ai/knowledge/[id]/route.ts",
+   "method": "PATCH",
+   "path": "/api/ai/knowledge/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/ai/knowledge/reindex/route.ts",
+   "method": "POST",
+   "path": "/api/ai/knowledge/reindex",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/ai/knowledge/route.ts",
+   "method": "GET",
+   "path": "/api/ai/knowledge",
+   "kind": "member"
+  },
+  {
+   "route": "api/ai/knowledge/route.ts",
+   "method": "POST",
+   "path": "/api/ai/knowledge",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/ai/playground/route.ts",
+   "method": "POST",
+   "path": "/api/ai/playground",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/ai/test/route.ts",
+   "method": "POST",
+   "path": "/api/ai/test",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/ai/usage/route.ts",
+   "method": "GET",
+   "path": "/api/ai/usage",
+   "kind": "role",
+   "minRole": "admin"
+  },
+  {
+   "route": "api/automations/[id]/duplicate/route.ts",
+   "method": "POST",
+   "path": "/api/automations/00000000-0000-4000-8000-000000000000/duplicate",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/automations/[id]/route.ts",
+   "method": "DELETE",
+   "path": "/api/automations/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "agent"
+  },
+  {
+   "route": "api/automations/[id]/route.ts",
+   "method": "GET",
+   "path": "/api/automations/00000000-0000-4000-8000-000000000000",
+   "kind": "member"
+  },
+  {
+   "route": "api/automations/[id]/route.ts",
+   "method": "PATCH",
+   "path": "/api/automations/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/automations/engine/route.ts",
+   "method": "POST",
+   "path": "/api/automations/engine",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/automations/route.ts",
+   "method": "GET",
+   "path": "/api/automations",
+   "kind": "session"
+  },
+  {
+   "route": "api/automations/route.ts",
+   "method": "POST",
+   "path": "/api/automations",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/contacts/[id]/tags/route.ts",
+   "method": "DELETE",
+   "path": "/api/contacts/00000000-0000-4000-8000-000000000000/tags",
+   "kind": "role",
+   "minRole": "agent"
+  },
+  {
+   "route": "api/contacts/[id]/tags/route.ts",
+   "method": "POST",
+   "path": "/api/contacts/00000000-0000-4000-8000-000000000000/tags",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/flows/[id]/activate/route.ts",
+   "method": "POST",
+   "path": "/api/flows/00000000-0000-4000-8000-000000000000/activate",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/flows/[id]/route.ts",
+   "method": "DELETE",
+   "path": "/api/flows/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "agent"
+  },
+  {
+   "route": "api/flows/[id]/route.ts",
+   "method": "GET",
+   "path": "/api/flows/00000000-0000-4000-8000-000000000000",
+   "kind": "session"
+  },
+  {
+   "route": "api/flows/[id]/route.ts",
+   "method": "PUT",
+   "path": "/api/flows/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/flows/[id]/runs/route.ts",
+   "method": "GET",
+   "path": "/api/flows/00000000-0000-4000-8000-000000000000/runs",
+   "kind": "session"
+  },
+  {
+   "route": "api/flows/route.ts",
+   "method": "GET",
+   "path": "/api/flows",
+   "kind": "session"
+  },
+  {
+   "route": "api/flows/route.ts",
+   "method": "POST",
+   "path": "/api/flows",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/flows/templates/route.ts",
+   "method": "GET",
+   "path": "/api/flows/templates",
+   "kind": "session"
+  },
+  {
+   "route": "api/invitations/[token]/redeem/route.ts",
+   "method": "POST",
+   "path": "/api/invitations/00000000-0000-4000-8000-000000000000/redeem",
+   "kind": "session",
+   "body": {}
+  },
+  {
+   "route": "api/quick-replies/[id]/route.ts",
+   "method": "DELETE",
+   "path": "/api/quick-replies/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "agent"
+  },
+  {
+   "route": "api/quick-replies/[id]/route.ts",
+   "method": "PATCH",
+   "path": "/api/quick-replies/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/quick-replies/route.ts",
+   "method": "GET",
+   "path": "/api/quick-replies",
+   "kind": "member"
+  },
+  {
+   "route": "api/quick-replies/route.ts",
+   "method": "POST",
+   "path": "/api/quick-replies",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/v1/broadcasts/[id]/route.ts",
+   "method": "GET",
+   "path": "/api/v1/broadcasts/00000000-0000-4000-8000-000000000000",
+   "kind": "apikey"
+  },
+  {
+   "route": "api/v1/broadcasts/route.ts",
+   "method": "POST",
+   "path": "/api/v1/broadcasts",
+   "kind": "apikey",
+   "body": {}
+  },
+  {
+   "route": "api/v1/contacts/[id]/route.ts",
+   "method": "GET",
+   "path": "/api/v1/contacts/00000000-0000-4000-8000-000000000000",
+   "kind": "apikey"
+  },
+  {
+   "route": "api/v1/contacts/[id]/route.ts",
+   "method": "PATCH",
+   "path": "/api/v1/contacts/00000000-0000-4000-8000-000000000000",
+   "kind": "apikey",
+   "body": {}
+  },
+  {
+   "route": "api/v1/contacts/route.ts",
+   "method": "GET",
+   "path": "/api/v1/contacts",
+   "kind": "apikey"
+  },
+  {
+   "route": "api/v1/contacts/route.ts",
+   "method": "POST",
+   "path": "/api/v1/contacts",
+   "kind": "apikey",
+   "body": {}
+  },
+  {
+   "route": "api/v1/conversations/[id]/messages/route.ts",
+   "method": "GET",
+   "path": "/api/v1/conversations/00000000-0000-4000-8000-000000000000/messages",
+   "kind": "apikey"
+  },
+  {
+   "route": "api/v1/conversations/[id]/route.ts",
+   "method": "GET",
+   "path": "/api/v1/conversations/00000000-0000-4000-8000-000000000000",
+   "kind": "apikey"
+  },
+  {
+   "route": "api/v1/conversations/route.ts",
+   "method": "GET",
+   "path": "/api/v1/conversations",
+   "kind": "apikey"
+  },
+  {
+   "route": "api/v1/me/route.ts",
+   "method": "GET",
+   "path": "/api/v1/me",
+   "kind": "apikey",
+   "unscoped": true
+  },
+  {
+   "route": "api/v1/messages/route.ts",
+   "method": "POST",
+   "path": "/api/v1/messages",
+   "kind": "apikey",
+   "body": {}
+  },
+  {
+   "route": "api/v1/webhooks/[id]/route.ts",
+   "method": "DELETE",
+   "path": "/api/v1/webhooks/00000000-0000-4000-8000-000000000000",
+   "kind": "apikey"
+  },
+  {
+   "route": "api/v1/webhooks/[id]/route.ts",
+   "method": "GET",
+   "path": "/api/v1/webhooks/00000000-0000-4000-8000-000000000000",
+   "kind": "apikey"
+  },
+  {
+   "route": "api/v1/webhooks/[id]/route.ts",
+   "method": "PATCH",
+   "path": "/api/v1/webhooks/00000000-0000-4000-8000-000000000000",
+   "kind": "apikey",
+   "body": {}
+  },
+  {
+   "route": "api/v1/webhooks/route.ts",
+   "method": "GET",
+   "path": "/api/v1/webhooks",
+   "kind": "apikey"
+  },
+  {
+   "route": "api/v1/webhooks/route.ts",
+   "method": "POST",
+   "path": "/api/v1/webhooks",
+   "kind": "apikey",
+   "body": {}
+  },
+  {
+   "route": "api/whatsapp/broadcast/[id]/resume/route.ts",
+   "method": "POST",
+   "path": "/api/whatsapp/broadcast/00000000-0000-4000-8000-000000000000/resume",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/whatsapp/broadcast/route.ts",
+   "method": "POST",
+   "path": "/api/whatsapp/broadcast",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/whatsapp/config/route.ts",
+   "method": "DELETE",
+   "path": "/api/whatsapp/config",
+   "kind": "role",
+   "minRole": "admin"
+  },
+  {
+   "route": "api/whatsapp/config/route.ts",
+   "method": "GET",
+   "path": "/api/whatsapp/config",
+   "kind": "session"
+  },
+  {
+   "route": "api/whatsapp/config/route.ts",
+   "method": "POST",
+   "path": "/api/whatsapp/config",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/whatsapp/config/verify-registration/route.ts",
+   "method": "GET",
+   "path": "/api/whatsapp/config/verify-registration",
+   "kind": "session"
+  },
+  {
+   "route": "api/whatsapp/health/route.ts",
+   "method": "GET",
+   "path": "/api/whatsapp/health",
+   "kind": "member"
+  },
+  {
+   "route": "api/whatsapp/media/[mediaId]/route.ts",
+   "method": "GET",
+   "path": "/api/whatsapp/media/00000000-0000-4000-8000-000000000000",
+   "kind": "session"
+  },
+  {
+   "route": "api/whatsapp/react/route.ts",
+   "method": "POST",
+   "path": "/api/whatsapp/react",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/whatsapp/send/route.ts",
+   "method": "POST",
+   "path": "/api/whatsapp/send",
+   "kind": "role",
+   "minRole": "agent",
+   "body": {}
+  },
+  {
+   "route": "api/whatsapp/templates/[id]/route.ts",
+   "method": "DELETE",
+   "path": "/api/whatsapp/templates/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "admin"
+  },
+  {
+   "route": "api/whatsapp/templates/[id]/route.ts",
+   "method": "PATCH",
+   "path": "/api/whatsapp/templates/00000000-0000-4000-8000-000000000000",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/whatsapp/templates/submit/route.ts",
+   "method": "POST",
+   "path": "/api/whatsapp/templates/submit",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  },
+  {
+   "route": "api/whatsapp/templates/sync/route.ts",
+   "method": "POST",
+   "path": "/api/whatsapp/templates/sync",
+   "kind": "role",
+   "minRole": "admin",
+   "body": {}
+  }
+ ],
+ "tenancy": [
+  {
+   "id": "flow-get",
+   "method": "GET",
+   "path": "/api/flows/{{A.flow}}",
+   "foreign": "otherOwner",
+   "positive": {
+    "principal": "owner",
+    "status": [
+     200
+    ]
+   }
+  },
+  {
+   "id": "flow-runs",
+   "method": "GET",
+   "path": "/api/flows/{{A.flow}}/runs",
+   "foreign": "otherOwner",
+   "positive": {
+    "principal": "owner",
+    "status": [
+     200
+    ]
+   }
+  },
+  {
+   "id": "flow-put",
+   "method": "PUT",
+   "path": "/api/flows/{{A.flow}}",
+   "foreign": "otherOwner",
+   "body": {
+    "name": "HIJACK"
+   }
+  },
+  {
+   "id": "flow-delete",
+   "method": "DELETE",
+   "path": "/api/flows/{{A.flow}}",
+   "foreign": "otherOwner"
+  },
+  {
+   "id": "flow-activate",
+   "method": "POST",
+   "path": "/api/flows/{{A.flow}}/activate",
+   "foreign": "otherOwner",
+   "body": {}
+  },
+  {
+   "id": "automation-get",
+   "method": "GET",
+   "path": "/api/automations/{{A.auto}}",
+   "foreign": "otherOwner",
+   "positive": {
+    "principal": "owner",
+    "status": [
+     200
+    ]
+   }
+  },
+  {
+   "id": "automation-patch",
+   "method": "PATCH",
+   "path": "/api/automations/{{A.auto}}",
+   "foreign": "otherOwner",
+   "body": {
+    "name": "HIJACK"
+   }
+  },
+  {
+   "id": "automation-delete",
+   "method": "DELETE",
+   "path": "/api/automations/{{A.auto}}",
+   "foreign": "otherOwner"
+  },
+  {
+   "id": "automation-duplicate",
+   "method": "POST",
+   "path": "/api/automations/{{A.auto}}/duplicate",
+   "foreign": "otherOwner",
+   "body": {}
+  },
+  {
+   "id": "quick-reply-patch",
+   "method": "PATCH",
+   "path": "/api/quick-replies/{{A.qr}}",
+   "foreign": "otherOwner",
+   "body": {
+    "title": "HIJACK"
+   }
+  },
+  {
+   "id": "quick-reply-delete",
+   "method": "DELETE",
+   "path": "/api/quick-replies/{{A.qr}}",
+   "foreign": "otherOwner"
+  },
+  {
+   "id": "knowledge-get",
+   "method": "GET",
+   "path": "/api/ai/knowledge/{{A.doc}}",
+   "foreign": "otherOwner",
+   "positive": {
+    "principal": "owner",
+    "status": [
+     200
+    ]
+   }
+  },
+  {
+   "id": "knowledge-patch",
+   "method": "PATCH",
+   "path": "/api/ai/knowledge/{{A.doc}}",
+   "foreign": "otherOwner",
+   "body": {
+    "title": "HIJACK"
+   }
+  },
+  {
+   "id": "knowledge-delete",
+   "method": "DELETE",
+   "path": "/api/ai/knowledge/{{A.doc}}",
+   "foreign": "otherOwner"
+  },
+  {
+   "id": "contact-tag-add",
+   "method": "POST",
+   "path": "/api/contacts/{{A.contact}}/tags",
+   "foreign": "otherOwner",
+   "body": {
+    "tag_id": "{{A.tag}}"
+   }
+  },
+  {
+   "id": "contact-tag-remove",
+   "method": "DELETE",
+   "path": "/api/contacts/{{A.contact}}/tags",
+   "foreign": "otherOwner",
+   "body": {
+    "tag_id": "{{A.tag}}"
+   }
+  },
+  {
+   "id": "member-remove",
+   "method": "DELETE",
+   "path": "/api/account/members/{{A.agentUser}}",
+   "foreign": "otherOwner"
+  },
+  {
+   "id": "member-role",
+   "method": "PATCH",
+   "path": "/api/account/members/{{A.agentUser}}",
+   "foreign": "otherOwner",
+   "body": {
+    "role": "viewer"
+   }
+  },
+  {
+   "id": "invitation-delete",
+   "method": "DELETE",
+   "path": "/api/account/invitations/{{A.inv}}",
+   "foreign": "otherOwner"
+  },
+  {
+   "id": "api-key-revoke",
+   "method": "DELETE",
+   "path": "/api/account/api-keys/{{A.apiKeyRow}}",
+   "foreign": "otherOwner"
+  },
+  {
+   "id": "template-patch",
+   "method": "PATCH",
+   "path": "/api/whatsapp/templates/{{A.template}}",
+   "foreign": "otherOwner",
+   "body": {
+    "body_text": "HIJACK"
+   }
+  },
+  {
+   "id": "template-delete",
+   "method": "DELETE",
+   "path": "/api/whatsapp/templates/{{A.template}}",
+   "foreign": "otherOwner"
+  },
+  {
+   "id": "broadcast-resume",
+   "method": "POST",
+   "path": "/api/whatsapp/broadcast/{{A.bcast}}/resume",
+   "foreign": "otherOwner",
+   "body": {}
+  },
+  {
+   "id": "autoreply",
+   "method": "POST",
+   "path": "/api/ai/autoreply/{{A.conv}}",
+   "foreign": "otherOwner",
+   "body": {}
+  },
+  {
+   "id": "send-into-foreign-conversation",
+   "method": "POST",
+   "path": "/api/whatsapp/send",
+   "foreign": "otherOwner",
+   "body": {
+    "conversation_id": "{{A.conv}}",
+    "message_type": "text",
+    "content_text": "HIJACK"
+   }
+  },
+  {
+   "id": "react-to-foreign-message",
+   "method": "POST",
+   "path": "/api/whatsapp/react",
+   "foreign": "otherOwner",
+   "body": {
+    "messageId": "{{A.msg}}",
+    "message_id": "{{A.msg}}",
+    "emoji": "x"
+   }
+  },
+  {
+   "id": "v1-contact-get",
+   "method": "GET",
+   "path": "/api/v1/contacts/{{A.contact}}",
+   "foreign": "otherApiKey",
+   "positive": {
+    "principal": "apiKey",
+    "status": [
+     200
+    ]
+   }
+  },
+  {
+   "id": "v1-contact-patch",
+   "method": "PATCH",
+   "path": "/api/v1/contacts/{{A.contact}}",
+   "foreign": "otherApiKey",
+   "body": {
+    "name": "HIJACK"
+   }
+  },
+  {
+   "id": "v1-conversation-get",
+   "method": "GET",
+   "path": "/api/v1/conversations/{{A.conv}}",
+   "foreign": "otherApiKey",
+   "positive": {
+    "principal": "apiKey",
+    "status": [
+     200
+    ]
+   }
+  },
+  {
+   "id": "v1-conversation-messages",
+   "method": "GET",
+   "path": "/api/v1/conversations/{{A.conv}}/messages",
+   "foreign": "otherApiKey",
+   "positive": {
+    "principal": "apiKey",
+    "status": [
+     200
+    ]
+   }
+  },
+  {
+   "id": "v1-broadcast-get",
+   "method": "GET",
+   "path": "/api/v1/broadcasts/{{A.bcast}}",
+   "foreign": "otherApiKey",
+   "positive": {
+    "principal": "apiKey",
+    "status": [
+     200
+    ]
+   }
+  },
+  {
+   "id": "v1-webhook-get",
+   "method": "GET",
+   "path": "/api/v1/webhooks/{{A.webhook}}",
+   "foreign": "otherApiKey",
+   "positive": {
+    "principal": "apiKey",
+    "status": [
+     200
+    ]
+   }
+  },
+  {
+   "id": "v1-webhook-patch",
+   "method": "PATCH",
+   "path": "/api/v1/webhooks/{{A.webhook}}",
+   "foreign": "otherApiKey",
+   "body": {
+    "is_active": false
+   }
+  },
+  {
+   "id": "v1-webhook-delete",
+   "method": "DELETE",
+   "path": "/api/v1/webhooks/{{A.webhook}}",
+   "foreign": "otherApiKey"
+  }
+ ],
+ "special": [
+  {
+   "route": "api/automations/cron/route.ts",
+   "reason": "cron secret: covered by http-authz \"cron\" tests"
+  },
+  {
+   "route": "api/flows/cron/route.ts",
+   "reason": "cron secret: covered by http-authz \"cron\" tests"
+  },
+  {
+   "route": "api/whatsapp/webhook/route.ts",
+   "reason": "Meta verify token / signature: covered by http-authz \"meta webhook\" tests"
+  },
+  {
+   "route": "api/media/[bucket]/[...path]/route.ts",
+   "reason": "private media: covered by storage.test.mjs"
+  },
+  {
+   "route": "api/health/live/route.ts",
+   "reason": "public by design: covered by http-authz \"public routes\" tests"
+  },
+  {
+   "route": "api/health/ready/route.ts",
+   "reason": "public by design: covered by http-authz \"public routes\" tests"
+  },
+  {
+   "route": "api/invitations/[token]/peek/route.ts",
+   "reason": "public by design: covered by http-authz \"public routes\" tests"
+  },
+  {
+   "route": "auth/callback/route.ts",
+   "reason": "public by design: covered by http-authz \"public routes\" tests"
+  }
+ ]
+}

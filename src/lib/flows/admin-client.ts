@@ -1,3 +1,5 @@
+import 'server-only'
+
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 // Lazy, shared service-role client for the Flows engine.

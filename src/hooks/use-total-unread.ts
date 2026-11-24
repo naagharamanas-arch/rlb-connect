@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllPages } from "@/lib/supabase/paged-query";
 import { applyUnreadChange, type UnreadChange } from "@/lib/inbox/unread-set";
+import { DELETION_CHANGES, deletionFor } from "@/lib/realtime/deletions";
 
 /**
  * Count of conversations with at least one unread inbound message for
@@ -55,6 +56,15 @@ export function useTotalUnread(): number {
           setTotal(unreadIds.size);
         },
       )
+      // A deleted conversation arrives as a deletion signal (DELETE events are not
+      // published — migration 065).
+      .on("postgres_changes", DELETION_CHANGES, (payload) => {
+        const old = deletionFor("conversations", payload);
+        if (!old) return;
+        const unreadIds = unreadIdsRef.current;
+        applyUnreadChange(unreadIds, { eventType: "DELETE", old: old as { id?: string } });
+        setTotal(unreadIds.size);
+      })
       .subscribe();
 
     return () => {

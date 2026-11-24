@@ -8,6 +8,7 @@ import {
   unreadCountChange,
 } from "@/lib/notifications/unread-count";
 import type { Notification } from "@/types";
+import { DELETION_CHANGES, deletionFor } from "@/lib/realtime/deletions";
 
 /**
  * Count of unread notifications for the current user. Used by the
@@ -62,6 +63,12 @@ export function useUnreadNotifications(): number {
           }
         },
       )
+      // A deleted notification arrives as a deletion signal (DELETE events are not
+      // published — migration 065); it reaches only the notified user, and a delete
+      // always means "refetch the count".
+      .on("postgres_changes", DELETION_CHANGES, (payload) => {
+        if (deletionFor("notifications", payload)) void loadCount();
+      })
       .subscribe();
 
     return () => {

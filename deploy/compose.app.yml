@@ -1,0 +1,79 @@
+# One application stack (web + scheduler). Run once per environment with a
+# distinct project name and env file, e.g. on the VPS:
+#
+#   APP_IMAGE=ghcr.io/<owner>/rlb-connect:staging-<sha> STACK_NAME=staging \
+#   APP_ENV_FILE=/srv/rlb/staging/app.env \
+#   docker compose -p rlb-staging -f deploy/compose.app.yml up -d
+#
+# The image is pulled from GHCR — never built on the host. Runtime secrets
+# live only in APP_ENV_FILE (variables as in .env.local.example, plus
+# AUTOMATION_CRON_SECRET). NEXT_PUBLIC_* values are baked into the image at
+# build time by .github/workflows/publish-image.yml, so each environment
+# uses its own image built from the same commit.
+#
+# The app is NOT published on a host port; the shared Caddy edge
+# (deploy/compose.edge.yml) reaches it over the external `edge` network.
+
+services:
+  app:
+    image: ${APP_IMAGE:?set APP_IMAGE to the GHCR image reference}
+    env_file:
+      - ${APP_ENV_FILE:?set APP_ENV_FILE to the server-side env file}
+    environment:
+      PORT: 3000
+    restart: unless-stopped
+    networks:
+      default: {}
+      edge:
+        aliases:
+          - app-${STACK_NAME:?set STACK_NAME, e.g. staging}
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3000/api/health/live').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Interim scheduler (until the worker exists): calls the two cron
+  # endpoints once a minute with the shared secret, directly on the
+  # internal network (never through the public proxy).
+  scheduler:
+    image: ${APP_IMAGE}
+    env_file:
+      - ${APP_ENV_FILE}
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    command:
+      - node
+      - -e
+      - |
+        const secret = process.env.AUTOMATION_CRON_SECRET
+        if (!secret) { console.error('AUTOMATION_CRON_SECRET is not set'); process.exit(1) }
+        const paths = ['/api/automations/cron', '/api/flows/cron']
+        async function tick() {
+          for (const p of paths) {
+            try {
+              const r = await fetch('http://app:3000' + p, {
+                headers: { 'x-cron-secret': secret },
+                signal: AbortSignal.timeout(55000),
+              })
+              console.log(new Date().toISOString(), p, r.status)
+            } catch (e) {
+              console.error(new Date().toISOString(), p, 'failed', e.name)
+            }
+          }
+        }
+        tick()
+        setInterval(tick, 60000)
+
+networks:
+  edge:
+    external: true

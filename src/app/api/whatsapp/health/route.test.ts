@@ -25,6 +25,9 @@ vi.mock('@/lib/auth/account', async () => {
   }
 })
 
+vi.mock('@/lib/credentials/server', () => ({
+  fetchWhatsAppConfig: async () => ({ data: storedConfig, error: null }),
+}))
 vi.mock('@/lib/whatsapp/encryption', () => ({ decrypt: (v: string) => `plain:${v}` }))
 vi.mock('@/lib/whatsapp/meta-api', () => ({
   getPhoneNumberHealth: (args: unknown) => getPhoneNumberHealth(args),
