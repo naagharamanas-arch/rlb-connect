@@ -39,6 +39,18 @@ const h = vi.hoisted(() => ({
     /** Patches applied to an existing `contacts` row. */
     contactUpdates: [] as Record<string, unknown>[],
     whatsappConfigLookups: [] as { columns: string; value: unknown }[],
+    /**
+     * Rows the phone_number_id lookup on `whatsapp_config` resolves to.
+     * null → the default single row, registered to WABA 'WABA-1'.
+     */
+    whatsappConfigRows: null as Record<string, unknown>[] | null,
+    /** Rows the GET handshake's verify-token query resolves to. */
+    verifyConfigs: [{ id: 'cfg-1', verify_token: 'enc-token' }] as {
+      id: string
+      verify_token: string | null
+    }[],
+    /** How many times the handshake read tenants' verify tokens. */
+    verifyQueries: 0,
     /** broadcast_recipients row the status webhook targets. */
     broadcastRecipient: null as { id: string; status: string } | null,
     /** Patches applied to that broadcast_recipients row. */
@@ -65,16 +77,22 @@ vi.mock('@supabase/supabase-js', () => ({
               eq: (_column: string, value: unknown) => {
                 h.state.whatsappConfigLookups.push({ columns, value })
                 return Promise.resolve({
-                  data: [
+                  data: h.state.whatsappConfigRows ?? [
                     {
                       account_id: 'acc-1',
                       user_id: 'user-1',
                       access_token: 'enc',
+                      waba_id: 'WABA-1',
                       mirror_inbound_media: h.state.mirrorInboundMedia,
                     },
                   ],
                   error: null,
                 })
+              },
+              // GET handshake: select('id, verify_token').not(...)
+              not: () => {
+                h.state.verifyQueries++
+                return Promise.resolve({ data: h.state.verifyConfigs, error: null })
               },
             }),
           }
@@ -252,7 +270,10 @@ vi.mock('@/lib/contacts/dedupe', () => ({
   isUniqueViolation: () => false,
 }))
 
-vi.mock('@/lib/whatsapp/webhook-signature', () => ({
+vi.mock('@/lib/whatsapp/webhook-signature', async (importOriginal) => ({
+  // Keep the real helpers (verifyTokenMatches is used by the GET handshake)
+  // and stub only the HMAC check, which these tests don't sign for.
+  ...(await importOriginal<typeof import('@/lib/whatsapp/webhook-signature')>()),
   verifyMetaWebhookSignature: () => true,
 }))
 vi.mock('@/lib/whatsapp/template-webhook', () => ({
@@ -278,7 +299,8 @@ vi.mock('@/lib/whatsapp/message-status-sync', () => ({
 }))
 
 import { deriveObjectToken } from '@/lib/storage/media-server'
-import { POST } from './route'
+import { GET, POST } from './route'
+import { __resetRateLimitForTests, RATE_LIMITS } from '@/lib/rate-limit'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { findExistingContact } from '@/lib/contacts/dedupe'
 import { handleTemplateWebhookChange } from '@/lib/whatsapp/template-webhook'
@@ -313,6 +335,7 @@ function inboundRequest(
   const body = {
     entry: [
       {
+        id: 'WABA-1',
         changes: [
           {
             field: 'messages',
@@ -344,6 +367,7 @@ async function runStatusWebhook(status: Record<string, unknown>) {
   const body = {
     entry: [
       {
+        id: 'WABA-1',
         changes: [
           {
             field: 'messages',
@@ -380,6 +404,10 @@ beforeEach(() => {
   h.state.contactInserts = []
   h.state.contactUpdates = []
   h.state.whatsappConfigLookups = []
+  h.state.whatsappConfigRows = null
+  h.state.verifyConfigs = [{ id: 'cfg-1', verify_token: 'enc-token' }]
+  h.state.verifyQueries = 0
+  __resetRateLimitForTests()
   h.state.broadcastRecipient = null
   h.state.recipientUpdates = []
   mockFindExistingContact.mockResolvedValue({
@@ -1178,7 +1206,7 @@ describe('status webhook: scoped to the receiving number', () => {
     await runStatusWebhook(DELIVERED)
 
     expect(h.state.whatsappConfigLookups).toEqual([
-      { columns: 'account_id', value: 'pn-1' },
+      { columns: 'account_id, waba_id', value: 'pn-1' },
     ])
     expect(h.applyMessageStatus).toHaveBeenCalledWith(
       expect.anything(),
@@ -1229,5 +1257,279 @@ describe('inbound webhook: first_inbound_message fires once', () => {
     h.state.messageUpsertResult = []
     await runWebhook()
     expect(h.state.firstInboundClaims).toBe(0)
+  })
+})
+
+// ── Cross-tenant routing: phone_number_id must agree with entry.id (WABA) ──
+
+const CFG_WABA_A = {
+  account_id: 'acc-1',
+  user_id: 'user-1',
+  access_token: 'enc',
+  mirror_inbound_media: true,
+  waba_id: 'WABA-A',
+}
+
+function entryBody(
+  entryId: string | undefined,
+  value: Record<string, unknown>,
+  phoneNumberId = 'pn-1',
+) {
+  return {
+    entry: [
+      {
+        ...(entryId === undefined ? {} : { id: entryId }),
+        changes: [
+          { field: 'messages', value: { metadata: { phone_number_id: phoneNumberId }, ...value } },
+        ],
+      },
+    ],
+  }
+}
+
+async function runEntry(body: unknown) {
+  const res = await POST(signedPost(JSON.stringify(body)))
+  for (const cb of h.state.afterCallbacks) await cb()
+  return res as unknown as { init?: { status?: number }; body?: unknown }
+}
+
+const INBOUND_VALUE = { contacts: LEGACY_CONTACTS, messages: [TEXT_MESSAGE] }
+const STATUS_VALUE = {
+  statuses: [
+    { id: 'wamid.OUT9', status: 'delivered', timestamp: '1700000100', recipient_id: '15551230000' },
+  ],
+}
+
+describe('inbound webhook: WABA / phone-number cross-check', () => {
+  it('routes a message whose entry.id matches the workspace stored WABA', async () => {
+    h.state.whatsappConfigRows = [CFG_WABA_A]
+    await runEntry(entryBody('WABA-A', INBOUND_VALUE))
+    expect(h.state.upsertCalls).toHaveLength(1)
+  })
+
+  it('DROPS a message delivered for that number under a different WABA (nothing is stored or fanned out)', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.state.whatsappConfigRows = [CFG_WABA_A]
+    const res = await runEntry(entryBody('WABA-EVIL', INBOUND_VALUE))
+
+    expect(res.init?.status).toBe(200) // Meta is still acknowledged: no retry storm
+    expect(h.state.upsertCalls).toHaveLength(0)
+    expect(h.state.contactInserts).toHaveLength(0)
+    expect(h.runAutomationsForTrigger).not.toHaveBeenCalled()
+    expect(h.dispatchInboundToFlows).not.toHaveBeenCalled()
+    expect(h.dispatchInboundToAiReply).not.toHaveBeenCalled()
+    expect(h.dispatchWebhookEvent).not.toHaveBeenCalled()
+    const logged = error.mock.calls.map((c) => c.join(' ')).join('\n')
+    expect(logged).toContain('rejected')
+    expect(logged).toContain('WABA-A')
+    expect(logged).toContain('WABA-EVIL')
+    // ids only: no token material in the log line
+    expect(logged).not.toContain('plain-token')
+  })
+
+  it('still routes a legacy row that has no stored WABA (cannot be verified, must not be dropped)', async () => {
+    h.state.whatsappConfigRows = [{ ...CFG_WABA_A, waba_id: null }]
+    await runEntry(entryBody('WABA-ANY', INBOUND_VALUE))
+    expect(h.state.upsertCalls).toHaveLength(1)
+  })
+
+  it('FAILS CLOSED when the envelope carries no entry.id', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.state.whatsappConfigRows = [CFG_WABA_A]
+    await runEntry(entryBody(undefined, INBOUND_VALUE))
+    expect(h.state.upsertCalls).toHaveLength(0)
+    expect(h.dispatchWebhookEvent).not.toHaveBeenCalled()
+    expect(error.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('no entry.id')
+  })
+
+  it('with WHATSAPP_REQUIRE_STORED_WABA=1 a legacy row with no stored WABA is dropped', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubEnv('WHATSAPP_REQUIRE_STORED_WABA', '1')
+    try {
+      h.state.whatsappConfigRows = [{ ...CFG_WABA_A, waba_id: null }]
+      await runEntry(entryBody('WABA-A', INBOUND_VALUE))
+      expect(h.state.upsertCalls).toHaveLength(0)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('drops a message with no metadata.phone_number_id (no TypeError, no DB lookup, non-sensitive warning)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    h.state.whatsappConfigRows = [CFG_WABA_A]
+    const lookupsBefore = h.state.whatsappConfigLookups.length
+    const res = await runEntry({
+      entry: [
+        {
+          id: 'WABA-A',
+          changes: [{ field: 'messages', value: { metadata: {}, ...INBOUND_VALUE } }],
+        },
+      ],
+    })
+    expect(res.init?.status).toBe(200)
+    expect(h.state.upsertCalls).toHaveLength(0)
+    expect(h.state.whatsappConfigLookups).toHaveLength(lookupsBefore)
+    expect(h.dispatchWebhookEvent).not.toHaveBeenCalled()
+    const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+    expect(logged).toContain('Inbound message without metadata.phone_number_id')
+    expect(logged).toContain('WABA-A')
+    expect(logged).not.toContain('plain-token')
+  })
+
+  it('drops a message with no metadata object at all (no TypeError)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    h.state.whatsappConfigRows = [CFG_WABA_A]
+    const res = await runEntry({
+      entry: [{ id: 'WABA-A', changes: [{ field: 'messages', value: { ...INBOUND_VALUE } }] }],
+    })
+    expect(res.init?.status).toBe(200)
+    expect(h.state.upsertCalls).toHaveLength(0)
+    expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toContain(
+      'Inbound message without metadata.phone_number_id',
+    )
+  })
+
+  it('drops a message when two configs claim the same phone_number_id (never picks one)', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.state.whatsappConfigRows = [CFG_WABA_A, { ...CFG_WABA_A, account_id: 'acc-2', user_id: 'user-2' }]
+    await runEntry(entryBody('WABA-A', INBOUND_VALUE))
+    expect(h.state.upsertCalls).toHaveLength(0)
+    expect(error.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('matched 2 configs')
+  })
+
+  it('drops a message for a phone number no workspace owns', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.state.whatsappConfigRows = []
+    await runEntry(entryBody('WABA-A', INBOUND_VALUE))
+    expect(h.state.upsertCalls).toHaveLength(0)
+  })
+})
+
+describe('status webhook: WABA / phone-number cross-check', () => {
+  it('applies a status to the workspace when the WABA matches', async () => {
+    h.state.whatsappConfigRows = [CFG_WABA_A]
+    await runEntry(entryBody('WABA-A', STATUS_VALUE))
+    expect(h.applyMessageStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      'acc-1',
+      expect.objectContaining({ wamid: 'wamid.OUT9' }),
+    )
+  })
+
+  it('does NOT apply a status delivered under a different WABA', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.state.whatsappConfigRows = [CFG_WABA_A]
+    await runEntry(entryBody('WABA-EVIL', STATUS_VALUE))
+    expect(h.applyMessageStatus).not.toHaveBeenCalled()
+    expect(h.dispatchWebhookEvent).not.toHaveBeenCalled()
+  })
+
+  it('does NOT apply a status when the envelope has no entry.id', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.state.whatsappConfigRows = [CFG_WABA_A]
+    await runEntry(entryBody(undefined, STATUS_VALUE))
+    expect(h.applyMessageStatus).not.toHaveBeenCalled()
+    expect(h.dispatchWebhookEvent).not.toHaveBeenCalled()
+  })
+
+  it('drops a status with no metadata.phone_number_id, with a non-sensitive warning and no DB lookup', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    h.state.whatsappConfigRows = [CFG_WABA_A]
+    await runEntry({
+      entry: [{ id: 'WABA-A', changes: [{ field: 'messages', value: { ...STATUS_VALUE } }] }],
+    })
+    expect(h.applyMessageStatus).not.toHaveBeenCalled()
+    expect(h.dispatchWebhookEvent).not.toHaveBeenCalled()
+    const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+    expect(logged).toContain('without metadata.phone_number_id')
+    expect(logged).toContain('WABA-A')
+    expect(logged).not.toContain('plain-token')
+  })
+
+  it('does not apply a status when two configs claim the number', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.state.whatsappConfigRows = [CFG_WABA_A, { ...CFG_WABA_A, account_id: 'acc-2' }]
+    await runEntry(entryBody('WABA-A', STATUS_VALUE))
+    expect(h.applyMessageStatus).not.toHaveBeenCalled()
+  })
+})
+
+describe('template webhook: tenant resolution input', () => {
+  it('hands entry.id to the template handler as the WABA id (the only tenant key it may use)', async () => {
+    const mockHandle = vi.mocked(handleTemplateWebhookChange)
+    const body = {
+      entry: [
+        {
+          id: 'WABA-TPL',
+          changes: [
+            {
+              field: 'message_template_status_update',
+              value: { event: 'APPROVED', message_template_id: '1' },
+            },
+          ],
+        },
+      ],
+    }
+    await runEntry(body)
+    expect(mockHandle).toHaveBeenCalledTimes(1)
+    expect(mockHandle.mock.calls[0][0]).toMatchObject({
+      field: 'message_template_status_update',
+      wabaId: 'WABA-TPL',
+    })
+  })
+})
+
+// ── GET: subscription handshake ──────────────────────────────────────────
+
+function verifyRequest(params: Record<string, string>, ip = '203.0.113.7') {
+  const url = new URL('http://localhost/api/whatsapp/webhook')
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
+  return new Request(url, { headers: { 'x-real-ip': ip } })
+}
+const HANDSHAKE = {
+  'hub.mode': 'subscribe',
+  'hub.challenge': 'abc123',
+  'hub.verify_token': 'plain-token',
+}
+
+describe('webhook verification handshake (GET)', () => {
+  const statusOf = (r: unknown) => (r as { init?: { status?: number } }).init?.status
+
+  it('answers the challenge when a stored verify token matches', async () => {
+    const res = (await GET(verifyRequest(HANDSHAKE))) as Response
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('abc123')
+  })
+
+  it('rejects a wrong token with 403', async () => {
+    h.state.verifyConfigs = [{ id: 'cfg-1', verify_token: 'enc-token' }]
+    // decrypt() is mocked to always return plain-token, so present a different one
+    const res = await GET(verifyRequest({ ...HANDSHAKE, 'hub.verify_token': 'nope' }))
+    expect(statusOf(res)).toBe(403)
+  })
+
+  it('rejects malformed requests with 400 and never reads tenant tokens', async () => {
+    const res = await GET(verifyRequest({ 'hub.mode': 'subscribe' }))
+    expect(statusOf(res)).toBe(400)
+    expect(h.state.verifyQueries).toBe(0)
+  })
+
+  it('reads the token-bearing configs once per handshake', async () => {
+    await GET(verifyRequest(HANDSHAKE))
+    expect(h.state.verifyQueries).toBe(1)
+  })
+
+  it('rate-limits per client IP and stops touching the database once limited', async () => {
+    const limit = RATE_LIMITS.webhookVerify.limit
+    for (let i = 0; i < limit; i++) await GET(verifyRequest(HANDSHAKE, '198.51.100.9'))
+    expect(h.state.verifyQueries).toBe(limit)
+
+    const blocked = await GET(verifyRequest(HANDSHAKE, '198.51.100.9'))
+    expect(statusOf(blocked)).toBe(429)
+    expect(h.state.verifyQueries).toBe(limit) // no extra DB read
+
+    // a different client is unaffected
+    const other = (await GET(verifyRequest(HANDSHAKE, '198.51.100.10'))) as Response
+    expect(other.status).toBe(200)
   })
 })

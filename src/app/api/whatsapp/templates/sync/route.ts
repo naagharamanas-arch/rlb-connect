@@ -6,6 +6,7 @@ import {
   toErrorResponse,
 } from '@/lib/auth/account'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { META_API_BASE } from '@/lib/whatsapp/meta-api'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
 import type { TemplateButton, TemplateSampleValues } from '@/types'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
@@ -26,9 +27,6 @@ const t = getT('Api')
  * Locally-created templates (no Meta counterpart) are NOT deleted —
  * they remain visible so the user can notice drift and clean up.
  */
-
-const META_API_VERSION = 'v21.0'
-const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
 
 interface MetaButton {
   type: string

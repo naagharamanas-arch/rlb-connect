@@ -10,7 +10,7 @@ import {
  * SERVER-ONLY access to credential-bearing columns.
  *
  * Why this exists (finding F1): the `authenticated` database role can no longer
- * SELECT the secret columns below (migration 062), so no browser session — and
+ * SELECT the secret columns below (migration 063), so no browser session — and
  * no RLS-scoped server client acting for a viewer or agent — can read them.
  * Anything that legitimately needs a secret (sending through Meta, calling the
  * AI provider, signing a webhook) reads it HERE, with the service role, after
@@ -29,7 +29,7 @@ import {
  *      non-sensitive facts ("connected", "last four digits").
  */
 
-/** Secret columns, per table. Mirrors migration 062's REVOKE list. */
+/** Secret columns, per table. Mirrors migration 063's REVOKE list. */
 export const CREDENTIAL_COLUMNS = {
   whatsapp_config: ['access_token', 'verify_token'],
   ai_configs: ['api_key', 'embeddings_api_key'],

@@ -195,6 +195,13 @@ export const RATE_LIMITS = {
   whatsappHealth: { limit: 30, windowMs: 60_000 },
   whatsappMedia: { limit: 240, windowMs: 60_000 },
   automationTrigger: { limit: 30, windowMs: 60_000 },
+  /** Meta webhook subscription handshake (`GET /api/whatsapp/webhook`),
+   *  per client IP. The endpoint is unauthenticated by design and each
+   *  attempt reads and decrypts tenants' verify tokens, so unbounded
+   *  guessing is both an enumeration attempt and a CPU/DB amplifier.
+   *  Meta performs the handshake a handful of times when a callback URL
+   *  is saved; 30/min per IP is far above that. */
+  webhookVerify: { limit: 30, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

@@ -19,19 +19,33 @@
  * done, status updates only land via the manual "Sync from Meta"
  * button (the legacy fallback, intentionally preserved).
  *
- * ─── Multi-tenant note ────────────────────────────────────────────
- * `meta_template_id` is globally unique per WABA — the lookup doesn't
- * filter by user_id. If two wacrm tenants somehow ended up with the
- * same id (impossible in practice, but a theoretical race during
- * cross-tenant moves), the handler updates both rows and logs a
- * warning so operators can investigate.
+ * ─── Multi-tenant routing ─────────────────────────────────────────
+ * A template event carries the WABA id (`entry.id`) and Meta's template
+ * id, nothing that names a workspace. The owning workspace(s) are
+ * resolved from `whatsapp_config.waba_id`, and EVERY write below is
+ * restricted to those workspaces:
+ *
+ *   - No `entry.id`, or no workspace claims that WABA  → the event is
+ *     ignored (logged). It is never applied by `meta_template_id` alone:
+ *     that would let a row in any workspace — however it got that id —
+ *     receive another business's template status.
+ *   - Several config rows, ONE workspace (several numbers under one WABA)
+ *     → one tenant; the event is applied to that workspace.
+ *   - Several workspaces claim the same WABA → the event updates the
+ *     matching rows of exactly those workspaces (each connected the WABA
+ *     with a token that can manage it) and nobody else. A stub row for a
+ *     template that no one has locally is NOT created, because the owner
+ *     cannot be chosen deterministically.
+ *
+ * Every template webhook write therefore carries an `account_id` filter,
+ * so a cross-tenant update cannot happen even if two workspaces somehow
+ * held the same `meta_template_id`.
  *
  * ─── Unknown templates (issue #534) ───────────────────────────────
  * A template created directly in Meta Business Manager has no local
  * row until someone presses "Sync from Meta", so its status / quality
- * events used to match 0 rows and be dropped. Both handlers now fall
- * back to creating a stub row: the WABA id on the webhook entry
- * resolves the owning account via `whatsapp_config.waba_id`, and the
+ * events used to match 0 rows and be dropped. Both handlers fall back to
+ * creating a stub row for the single workspace that owns the WABA. The
  * stub carries the identity (name / language / meta_template_id) plus
  * whatever the event told us (status, rejection reason, quality
  * score). Components are NOT known at this point — `body_text` is
@@ -45,6 +59,7 @@ import {
   clearsRejectionReason,
   templateStatusFromWebhookEvent,
 } from './template-status-normalize'
+import { groupTemplateOwners, type TemplateOwner } from './webhook-routing'
 
 const TEMPLATE_WEBHOOK_FIELDS = new Set([
   'message_template_status_update',
@@ -83,8 +98,8 @@ export interface TemplateWebhookChange {
   value: unknown
   /**
    * `entry.id` from the webhook envelope — for template events this is
-   * the WABA id. Optional so existing callers / tests keep working;
-   * without it an unknown template can only be logged, not stubbed.
+   * the WABA id. Meta always sends it; without it the owning workspace
+   * cannot be resolved and the event is ignored (logged).
    */
   wabaId?: string
 }
@@ -167,43 +182,15 @@ async function handleStatusUpdate(
     update.submission_error = null
   }
 
-  const { data, error } = await supabase
-    .from('message_templates')
-    .update(update)
-    .eq('meta_template_id', metaTemplateId)
-    .select('id')
-
-  if (error) {
-    console.error(
-      '[template-webhook] status update failed for meta_template_id',
-      metaTemplateId,
-      error.message,
-    )
-    return
-  }
-  if (!data || data.length === 0) {
-    await createStubForUnknownTemplate({
-      kind: 'status update',
-      metaTemplateId,
-      name: value.message_template_name,
-      language: value.message_template_language,
-      wabaId,
-      fields: update,
-      retryUpdate: () =>
-        supabase
-          .from('message_templates')
-          .update(update)
-          .eq('meta_template_id', metaTemplateId)
-          .select('id'),
-      supabase,
-    })
-    return
-  }
-  if (data.length > 1) {
-    console.warn(
-      `[template-webhook] status update matched ${data.length} rows for meta_template_id ${metaTemplateId} — investigate.`,
-    )
-  }
+  await applyTenantScopedUpdate({
+    kind: 'status update',
+    metaTemplateId,
+    name: value.message_template_name,
+    language: value.message_template_language,
+    wabaId,
+    fields: update,
+    supabase,
+  })
 }
 
 async function handleQualityUpdate(
@@ -229,42 +216,22 @@ async function handleQualityUpdate(
       ? (raw.toUpperCase() as 'GREEN' | 'YELLOW' | 'RED')
       : null
 
-  const update = { quality_score: score }
-  const runUpdate = () =>
-    supabase
-      .from('message_templates')
-      .update(update)
-      .eq('meta_template_id', metaTemplateId)
-      .select('id')
-
-  const { data, error } = await runUpdate()
-
-  if (error) {
-    console.error(
-      '[template-webhook] quality update failed for meta_template_id',
-      metaTemplateId,
-      error.message,
-    )
-    return
-  }
-  if (!data || data.length === 0) {
-    // A quality event carries no status. Leave `status` to the column
-    // default (DRAFT) rather than guessing APPROVED — Meta does score
-    // PAUSED templates too. "Sync from Meta" fixes it up.
-    await createStubForUnknownTemplate({
-      kind: 'quality update',
-      metaTemplateId,
-      name: value.message_template_name,
-      language: value.message_template_language,
-      wabaId,
-      fields: update,
-      retryUpdate: runUpdate,
-      supabase,
-    })
-  }
+  // A quality event carries no status. A stub created for an unknown
+  // template leaves `status` to the column default (DRAFT) rather than
+  // guessing APPROVED — Meta does score PAUSED templates too. "Sync from
+  // Meta" fixes it up.
+  await applyTenantScopedUpdate({
+    kind: 'quality update',
+    metaTemplateId,
+    name: value.message_template_name,
+    language: value.message_template_language,
+    wabaId,
+    fields: { quality_score: score },
+    supabase,
+  })
 }
 
-interface StubParams {
+interface ScopedUpdateParams {
   /** For log lines — 'status update' | 'quality update'. */
   kind: string
   metaTemplateId: string
@@ -273,19 +240,100 @@ interface StubParams {
   wabaId: string | undefined
   /** Event-derived columns (status / rejection_reason / quality_score). */
   fields: Record<string, unknown>
-  /** Re-runs the original UPDATE if the INSERT loses a race. */
-  retryUpdate: () => PromiseLike<{
-    data: { id: string }[] | null
-    error: { message: string } | null
-  }>
   supabase: SupabaseClient
 }
 
 /**
- * 0-row fallback shared by the status and quality handlers: resolve
- * the tenant from the WABA id and insert a stub `message_templates`
- * row so the event isn't lost. Every early-return path logs the WABA
- * id so an operator can tell which tenant needs a "Sync from Meta".
+ * Resolve the workspaces that own `wabaId`, apply the event to THEIR rows
+ * only, and fall back to a stub row when no row matched. See the
+ * "Multi-tenant routing" note at the top of the file for the rules.
+ */
+async function applyTenantScopedUpdate(p: ScopedUpdateParams): Promise<void> {
+  const { kind, metaTemplateId, name, wabaId, supabase } = p
+  const where = `meta_template_id ${metaTemplateId} (${name ?? 'unnamed'}), WABA ${wabaId ?? 'unknown'}`
+
+  if (!wabaId) {
+    console.warn(
+      `[template-webhook] ${kind} for template ${where} — no WABA id on the webhook entry, cannot resolve the owning workspace; event ignored. Run "Sync from Meta".`,
+    )
+    return
+  }
+
+  const { data: configs, error: configError } = await supabase
+    .from('whatsapp_config')
+    .select('account_id, user_id, created_at')
+    .eq('waba_id', wabaId)
+
+  if (configError) {
+    console.error(
+      `[template-webhook] ${kind} for template ${where} — whatsapp_config lookup failed:`,
+      configError.message,
+    )
+    return
+  }
+
+  const owners = groupTemplateOwners(
+    (configs ?? []) as {
+      account_id: string
+      user_id: string
+      created_at?: string | null
+    }[],
+  )
+  if (owners.length === 0) {
+    console.warn(
+      `[template-webhook] ${kind} for template ${where} — no whatsapp_config rows match that WABA id, so no workspace owns it; event ignored. Run "Sync from Meta" for the owning account.`,
+    )
+    return
+  }
+
+  const accountIds = owners.map((o) => o.account_id)
+  // Every write is restricted to the owning workspaces.
+  const runUpdate = () =>
+    supabase
+      .from('message_templates')
+      .update(p.fields)
+      .eq('meta_template_id', metaTemplateId)
+      .in('account_id', accountIds)
+      .select('id')
+
+  const { data, error } = await runUpdate()
+
+  if (error) {
+    console.error(
+      `[template-webhook] ${kind} failed for meta_template_id`,
+      metaTemplateId,
+      error.message,
+    )
+    return
+  }
+  if (data && data.length > 0) {
+    if (data.length > 1) {
+      console.warn(
+        `[template-webhook] ${kind} matched ${data.length} rows for meta_template_id ${metaTemplateId} (${owners.length} workspace(s) own WABA ${wabaId}) — investigate.`,
+      )
+    }
+    return
+  }
+
+  await createStubForUnknownTemplate({ ...p, where, owners, retryUpdate: runUpdate })
+}
+
+interface StubParams extends ScopedUpdateParams {
+  where: string
+  /** Workspaces that own the WABA, one per workspace, deterministic order. */
+  owners: TemplateOwner[]
+  /** Re-runs the original (tenant-scoped) UPDATE if the INSERT loses a race. */
+  retryUpdate: () => PromiseLike<{
+    data: { id: string }[] | null
+    error: { message: string } | null
+  }>
+}
+
+/**
+ * 0-row fallback shared by the status and quality handlers: insert a stub
+ * `message_templates` row for the single workspace that owns the WABA so
+ * the event isn't lost. Every early-return path logs the WABA id so an
+ * operator can tell which tenant needs a "Sync from Meta".
  *
  * NOTE: the sync itself is not triggered here. Its logic lives inside
  * the POST handler of /api/whatsapp/templates/sync (behind
@@ -295,50 +343,29 @@ interface StubParams {
  * components arrive on the next manual sync.
  */
 async function createStubForUnknownTemplate(p: StubParams): Promise<void> {
-  const { kind, metaTemplateId, name, wabaId, supabase } = p
-  const where = `meta_template_id ${metaTemplateId} (${name ?? 'unnamed'}), WABA ${wabaId ?? 'unknown'}`
+  const { kind, metaTemplateId, name, where, owners, supabase } = p
 
-  if (!wabaId) {
-    console.warn(
-      `[template-webhook] ${kind} for unknown template ${where} — no WABA id on the webhook entry, cannot resolve the account; run "Sync from Meta".`,
-    )
-    return
-  }
   if (!name) {
     console.warn(
       `[template-webhook] ${kind} for unknown template ${where} — event has no message_template_name, cannot create a stub row; run "Sync from Meta".`,
     )
     return
   }
-
-  const { data: configs, error: configError } = await supabase
-    .from('whatsapp_config')
-    .select('account_id, user_id')
-    .eq('waba_id', wabaId)
-
-  if (configError) {
-    console.error(
-      `[template-webhook] ${kind} for unknown template ${where} — whatsapp_config lookup failed:`,
-      configError.message,
-    )
-    return
-  }
-  const rows = (configs ?? []) as { account_id: string; user_id: string }[]
-  if (rows.length !== 1) {
+  if (owners.length !== 1) {
     console.warn(
-      `[template-webhook] ${kind} for unknown template ${where} — ${rows.length === 0 ? 'no' : rows.length} whatsapp_config rows match that WABA id; not creating a stub. Run "Sync from Meta" for the owning account.`,
+      `[template-webhook] ${kind} for unknown template ${where} — ${owners.length} workspaces claim that WABA id, so the owner cannot be chosen; not creating a stub. Run "Sync from Meta" for the owning account.`,
     )
     return
   }
 
-  const config = rows[0]
+  const owner = owners[0]
   // account_id is tenancy; user_id is the NOT NULL audit FK — the
   // config owner, same convention the webhook uses for inbound writes.
   // `category` and `status` fall back to their column defaults unless
   // the event supplied them (status events do, quality events don't).
   const stub = {
-    account_id: config.account_id,
-    user_id: config.user_id,
+    account_id: owner.account_id,
+    user_id: owner.user_id,
     meta_template_id: metaTemplateId,
     name,
     language: p.language || DEFAULT_TEMPLATE_LANGUAGE,
@@ -352,7 +379,7 @@ async function createStubForUnknownTemplate(p: StubParams): Promise<void> {
 
   if (!insertError) {
     console.info(
-      `[template-webhook] ${kind} for unknown template ${where} — created stub row for account ${config.account_id}; run "Sync from Meta" to backfill components.`,
+      `[template-webhook] ${kind} for unknown template ${where} — created stub row for account ${owner.account_id}; run "Sync from Meta" to backfill components.`,
     )
     return
   }
