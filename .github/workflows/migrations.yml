@@ -119,4 +119,8 @@ jobs:
           bash supabase/ci/apply-sql.sh supabase/migrations/061_data_api_grants.sql
           bash supabase/ci/apply-sql.sh supabase/migrations/063_credential_column_privileges.sql
           bash supabase/ci/apply-sql.sh supabase/migrations/065_realtime_deletion_signals.sql
+          # 067 creates account_memberships and grants it explicitly; 061 predates it, so
+          # re-applying 061 over legacy grants revokes that grant (same reason as 065).
+          # 067 is idempotent (IF NOT EXISTS / CREATE OR REPLACE / ON CONFLICT).
+          bash supabase/ci/apply-sql.sh supabase/migrations/067_account_memberships.sql
           supabase test db --local

@@ -1,0 +1,30 @@
+-- ============================================================
+-- 066_manager_role.sql — add the `manager` role (F2, step 0)
+--
+-- DRAFT — NOT APPLIED anywhere. Review: docs/architecture/08-f2-tenancy-design.md §6.
+--
+-- Role order becomes: owner > admin > manager > agent > viewer.
+--
+-- Why this is its own file
+--   ALTER TYPE ... ADD VALUE cannot be undone, and the new value cannot be
+--   used inside the transaction that adds it. Keeping it alone means the
+--   value is committed before any later migration refers to it.
+--
+-- Safety properties (verified by reading 017/018/047/055)
+--   * Nothing in this file grants any access or changes any policy.
+--   * `is_account_member` (017) ranks roles with a CASE that has no ELSE.
+--     A user holding `manager` would therefore get NO access (fail-closed)
+--     until migration 067 teaches the helper the new rank.
+--   * The member RPCs (018/047/055) test roles with explicit lists such as
+--     `NOT IN ('owner','admin')`, so `manager` gets no admin powers by default.
+--
+-- DEPLOY RULE: apply 066 and 067 in the SAME release. In the gap between them,
+-- an admin calling set_member_role(..., 'manager') directly would lock that
+-- member out (fail-closed, but still a lockout). No UI offers the role yet.
+--
+-- Rollback: Postgres cannot drop an enum value. Unused values are harmless; if
+-- ever needed, a forward migration would re-create the type. Do not apply to
+-- production without a tested backup and explicit owner approval.
+-- ============================================================
+
+ALTER TYPE account_role_enum ADD VALUE IF NOT EXISTS 'manager' BEFORE 'agent';

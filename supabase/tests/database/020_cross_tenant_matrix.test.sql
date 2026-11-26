@@ -1,4 +1,4 @@
--- 020_cross_tenant_matrix — the core isolation guarantee, for ALL 38 tables.
+-- 020_cross_tenant_matrix — the core isolation guarantee, for ALL 39 tables.
 --
 -- Two tenants (A, B), each with a row in every table. For every table we prove
 --   * POSITIVE CONTROL: each tenant's owner CAN see its own rows (so a broken
