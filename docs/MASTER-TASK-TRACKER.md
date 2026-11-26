@@ -107,3 +107,18 @@ Existing architecture docs (01–07) are preserved unchanged; this file only tra
 - CI on a29f369: lint/typecheck/test/build, HTTP/Realtime/Storage authz, build-and-push all success. PR #2 open, mergeable clean.
 - OPEN: production-stack-untouched listing; staging signup + DB write smoke test (owner-run, then read-only SQL).
 - Supersedes: P1.1–P1.6 above are done on staging per owner evidence; HEAD is a29f369 (pushed), not 781401a.
+
+## Wave 0 closure — 2026-11-27 ~00:45 IST (appended)
+- VPS `docker ps` (owner-run): only rlb-staging-app-1, rlb-staging-scheduler-1 (created 2026-11-26 23:21 IST) and rlb-edge-caddy-1 (created 2026-11-25, up 46h, not recreated). No production app container running on this VPS. (`docker ps -a` not run.)
+- Staging signup write test (owner-run signup; read-only SQL in staging project rlb-connect-staging-v2): profile + account created for the new user with account_role=owner and owner_user_id match => handle_new_user trigger and DB writes work on the STAGING project. RUNTIME VERIFIED.
+- Staging login + dashboard render + signup emails arriving (owner report). Staging Supabase is on the Free plan (relevant to I5/PITR later).
+- Residuals, not blocking: /api/health/ready not explicitly called; production Supabase not queried (separation shown by build guard, 0 production-ref matches, runtime URL).
+- **Wave 0: COMPLETE & VERIFIED for staging.**
+- Wave 1 / F2 design (doc 08) approved 2026-11-27; D-F2-1 manager role = yes; D-F2-2 = X-Workspace-Id header; D-F2-3 = draft F2-a (local only). Draft 066_manager_role.sql written, NOT applied, not committed.
+
+## F2-a (tenancy expand) — 2026-11-27 ~01:10 IST (appended)
+- Drafted: supabase/migrations/066_manager_role.sql, 067_account_memberships.sql; supabase/tests/database/110_account_memberships.test.sql; small edits to tests 000/010/020 and .github/workflows/migrations.yml (CI pass 3 re-applies 067 like 065).
+- Local run (owner PC, Docker, supabase CLI 2.113.0): `db reset --local --no-seed` applied 001–067 with no error; `test db --local` => 14 files, 1691 tests, Result: PASS (real-grants pass only).
+- Status: F2-a CODE IMPLEMENTED, TESTED LOCALLY (1 of 3 CI passes). NOT committed at the time of writing, NOT pushed, NOT DEPLOYED. Staging/production unchanged.
+- Remaining before F2-a can be applied to staging: CI passes 2 (open grants) and 3 (legacy grants re-applied); owner approval; read-only audit of staging data; for production additionally a read-only production audit + tested backup + explicit approval.
+- F2 overall: F2-a done in code; F2-b (RPC/invitation/handle_new_user rewrite), F2-c (/w/<id> routing + switcher + manager in UI/locales), F2-d (contract) PENDING.

@@ -10,7 +10,10 @@
 - Membership lives on **`profiles.account_id` + `profiles.account_role`** (one account per user).
   Direct edits to these two columns are blocked by a trigger (034); only RPCs change them.
 - Role enum `account_role_enum` = owner/admin/agent/viewer. Rank is hard-coded in 3 places that
-  must stay aligned: SQL `is_account_member` CASE, RPCs in 018, and `src/lib/auth/roles.ts`.
+  must stay aligned: SQL `is_account_member` CASE (017, no ELSE => unknown role = no access), the pgTAP
+  `tests.role_expect.min_rank` numbers, and `src/lib/auth/roles.ts`. The member RPCs (018/047/055) use explicit
+  role lists (e.g. `NOT IN ('owner','admin')`), not rank. UI role lists (invite dialog, members tab, role-meta,
+  peek-result, route-registry `RouteRole`, 4 locale files) also need `manager` in F2-c.
 - `is_account_member(account, min_role)` reads `profiles`; referenced **120 times in 13 migration files**
   (all RLS policies go through it).
 - Code that reads `profiles` for membership (must be reworked): 018 (`set_member_role`,
