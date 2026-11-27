@@ -44,10 +44,10 @@ describe("redeem_invitation migration", () => {
 
 describe("member RPC migrations", () => {
   it.each(["set_member_role", "remove_account_member", "transfer_account_ownership"])(
-    "%s locks the caller and target profiles in user_id order",
+    "%s locks the caller and target memberships in user_id order",
     (functionName) => {
       expect(latestFunctionBody(functionName)).toMatch(
-        /from\s+profiles\s+where\s+user_id\s+in\s*\(\s*auth\.uid\(\),\s*p_\w+\s*\)\s+order\s+by\s+user_id\s+for\s+update/i,
+        /from\s+account_memberships\s+where\s+account_id\s*=\s*p_account_id\s+and\s+user_id\s+in\s*\(\s*auth\.uid\(\),\s*p_\w+\s*\)\s+order\s+by\s+user_id\s+for\s+update/i,
       );
     },
   );
