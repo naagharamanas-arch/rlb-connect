@@ -122,3 +122,29 @@ Existing architecture docs (01–07) are preserved unchanged; this file only tra
 - Status: F2-a CODE IMPLEMENTED, TESTED LOCALLY (1 of 3 CI passes). NOT committed at the time of writing, NOT pushed, NOT DEPLOYED. Staging/production unchanged.
 - Remaining before F2-a can be applied to staging: CI passes 2 (open grants) and 3 (legacy grants re-applied); owner approval; read-only audit of staging data; for production additionally a read-only production audit + tested backup + explicit approval.
 - F2 overall: F2-a done in code; F2-b (RPC/invitation/handle_new_user rewrite), F2-c (/w/<id> routing + switcher + manager in UI/locales), F2-d (contract) PENDING.
+
+## Owner decision — private repository (2026-11-27 ~01:20 IST, appended)
+- Finding: repository is PUBLIC and is a fork of ArnasDon/wacrm; GHCR package rlb-connect is PUBLIC (VPS pulls without login). Branch feat/wave-1-f2a-memberships pushed 2026-11-27 (also published local docs commits 4f5e063, ce65f50).
+- Scan of 949 commits (all refs): no credentials of RLB origin; only upstream placeholder values. No rotation required.
+- Decision (owner): the code repository must become PRIVATE. Status: OWNER ACTION REQUIRED.
+- Route 1: Settings > General > Danger Zone > Change visibility (may be blocked for a public fork). Route 2: ask GitHub Support to detach the fork, then make private (keeps PRs, variables, package names). Route 3 (fallback): new private repo + `git push --mirror`; breaks PRs, Environment variables, GHCR package linkage; VPS would need `docker login ghcr.io` with a read-only package token (owner-created, never pasted in chat).
+- After any route: re-check Actions, staging Environment variables, GHCR package visibility/pull on the VPS (read-only `docker pull` test) BEFORE the next staging deploy. Keep LICENSE/NOTICE attribution.
+- Until private: keep new docs technical; no client names, credentials or customer data.
+
+## F2-a — staging evidence (2026-11-27)
+- PR #3 (draft, base `feat/wave-a-f1-tenant-test-platform`, head `feat/wave-1-f2a-memberships` @ `45e26d6`): CI green (Migrations / Apply to a clean database; Full-stack authorization). NOT merged.
+- Owner approval received: apply 066 + 067 to STAGING `seaovyepglxfiqmjjpmw` only, via `supabase db push --linked` (dry-run showed only 066/067 pending).
+- Pre-audit (read-only, staging): latest migration 065; enum owner/admin/agent/viewer; no `account_memberships`; 1 account, 1 profile (owner), 0 orphans.
+- Post-apply (staging): latest migration 067; enum includes `manager`; `account_memberships` 1 row (owner), RLS on; profile/membership parity 0 mismatches; `has_account_access` exists.
+- Runtime: staging login + dashboard load normally (RLS reads via memberships).
+- Status: CODE IMPLEMENTED, TESTED (local + CI), DEPLOYED to staging, RUNTIME VERIFIED (login/dashboard). Production: NOT applied; needs read-only prod audit, tested backup and separate explicit approval; 066 + 067 ship in the same release.
+- Rollback (staging): 067 drop steps in its header; 066 enum value cannot be dropped (harmless).
+- Next: F2-b (RPCs, invitations, handle_new_user, presence/notifications, 047 integrity triggers, `redeem_invitation`).
+
+## Owner backlog (2026-11-27)
+- Easy WhatsApp linking via official Embedded Signup / eligible Coexistence (needs Meta Tech Provider status) — not started.
+- Package/pricing plans: owner decision pending (pricing conflict); billing deferred per doc 05 item 8.
+- GoHighLevel-style agency UI: foundation = F2 workspace switcher; agency/sub-account UI in Wave 4/5.
+- RLB logo + rebrand cleanup (R1 `wacrm.tech` fallback): owner to supply logo files.
+- White-label: design only; agency ownership model A awaiting owner confirmation; depends on F2.
+- Repo visibility: stay public for now; make private before Wave 4 and before production.
