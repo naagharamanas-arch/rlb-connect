@@ -91,6 +91,11 @@ BEGIN
     AND user_id = p_user_id;
 
   IF NOT FOUND THEN
+    -- Unknown user id (no profile at all) keeps the pre-069 contract: 22023 (HTTP 400).
+    -- A real user who simply isn't in this workspace stays 42501 (HTTP 403).
+    IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = p_user_id) THEN
+      RAISE EXCEPTION 'Target user not found' USING ERRCODE = '22023';
+    END IF;
     RAISE EXCEPTION 'Target user is not a member of this account'
       USING ERRCODE = '42501';
   END IF;
@@ -179,6 +184,11 @@ BEGIN
     AND user_id = p_user_id;
 
   IF NOT FOUND THEN
+    -- Unknown user id (no profile at all) keeps the pre-069 contract: 22023 (HTTP 400).
+    -- A real user who simply isn't in this workspace stays 42501 (HTTP 403).
+    IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = p_user_id) THEN
+      RAISE EXCEPTION 'Target user not found' USING ERRCODE = '22023';
+    END IF;
     RAISE EXCEPTION 'Target user is not a member of this account'
       USING ERRCODE = '42501';
   END IF;
@@ -288,6 +298,9 @@ BEGIN
     AND status = 'active';
 
   IF NOT FOUND THEN
+    IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = p_new_owner_user_id) THEN
+      RAISE EXCEPTION 'Target user not found' USING ERRCODE = '22023';
+    END IF;
     RAISE EXCEPTION 'Target user is not an active member of this account'
       USING ERRCODE = '42501';
   END IF;
