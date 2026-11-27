@@ -1,16 +1,15 @@
 import { ImageResponse } from "next/og";
 
-// Replaces the default Next.js favicon with a PLACEHOLDER brand mark —
-// violet rounded square + white chat-square glyph (final RLB Connect logo pending approval) — matching the
-// sidebar logo in `src/components/layout/sidebar.tsx`. Next.js renders
-// this at build time and auto-injects <link rel="icon"> into <head>.
-//
-// This route takes precedence over src/app/favicon.ico, which is the
-// Next.js default and can stay on disk harmlessly (or be removed).
+// Favicon: the RLB symbol (64px PNG embedded as a data URI because the edge
+// runtime cannot read files). Regenerate from public/brand if the logo changes.
+// Next.js injects <link rel="icon"> from this route automatically.
 
 export const runtime = "edge";
-export const size = { width: 32, height: 32 };
+export const size = { width: 64, height: 64 };
 export const contentType = "image/png";
+
+const SYMBOL_PNG_BASE64 =
+  "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";
 
 export default function Icon() {
   return new ImageResponse(
@@ -22,22 +21,15 @@ export default function Icon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#7c3aed", // primary (placeholder purple, pending RLB Connect brand colours)
-          borderRadius: 6,
         }}
       >
-        <svg
-          width="20"
-          height="20"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#ffffff"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={`data:image/png;base64,${SYMBOL_PNG_BASE64}`}
+          width={64}
+          height={64}
+          alt=""
+        />
       </div>
     ),
     { ...size },

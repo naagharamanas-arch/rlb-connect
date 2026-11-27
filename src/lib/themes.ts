@@ -14,6 +14,7 @@
  */
 
 export const THEME_IDS = [
+  "rlb",
   "violet",
   "emerald",
   "cobalt",
@@ -23,7 +24,7 @@ export const THEME_IDS = [
 
 export type ThemeId = (typeof THEME_IDS)[number];
 
-export const DEFAULT_THEME: ThemeId = "violet";
+export const DEFAULT_THEME: ThemeId = "rlb";
 
 export const STORAGE_KEY = "wacrm.theme";
 
@@ -68,9 +69,15 @@ export interface ThemeMeta {
 
 export const THEMES: ReadonlyArray<ThemeMeta> = [
   {
+    id: "rlb",
+    name: "RLB Gold",
+    tagline: "The default — RLB brand gold on deep green-black.",
+    swatch: "oklch(0.7 0.1 75)",
+  },
+  {
     id: "violet",
     name: "Violet",
-    tagline: "The default — confident, slightly playful.",
+    tagline: "Confident, slightly playful.",
     swatch: "oklch(0.526 0.247 293)",
   },
   {
