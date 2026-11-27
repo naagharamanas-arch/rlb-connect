@@ -9,27 +9,6 @@ const migrations = readdirSync(migrationsDir)
   .sort()
   .map((name) => ({ name, sql: readFileSync(join(migrationsDir, name), "utf8") }));
 
-const tablesWithoutDomainData = new Set([
-  "profiles",
-  "account_invitations",
-  "member_presence",
-  "pending_message_statuses",
-]);
-
-function accountScopedTables(): Set<string> {
-  const tables = new Set<string>();
-  const accountForeignKey = /\baccount_id\s+uuid\b[^,;]*references\s+(?:public\.)?accounts\s*\(\s*id\s*\)/i;
-  const tableName = /(?:create\s+table(?:\s+if\s+not\s+exists)?|alter\s+table)\s+(?:public\.)?(\w+)/i;
-  for (const { sql } of migrations) {
-    for (const statement of sql.split(";")) {
-      if (!accountForeignKey.test(statement)) continue;
-      const match = statement.match(tableName);
-      if (match) tables.add(match[1].toLowerCase());
-    }
-  }
-  return tables;
-}
-
 function latestFunctionBody(functionName: string): string {
   const header = new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${functionName}\\s*\\(`, "i");
   const latest = migrations.filter(({ sql }) => header.test(sql)).at(-1);
@@ -43,22 +22,23 @@ function latestFunctionBody(functionName: string): string {
 describe("redeem_invitation migration", () => {
   const body = latestFunctionBody("redeem_invitation");
 
-  it("finds the account-scoped tables it is meant to guard", () => {
-    const tables = accountScopedTables();
-    expect(tables).toContain("contacts");
-    expect(tables).toContain("api_keys");
-    expect(tables).toContain("quick_replies");
+  it("adds a membership for the inviter's account", () => {
+    expect(body).toMatch(/insert\s+into\s+account_memberships/i);
   });
 
-  it("checks every account-scoped table for data before deleting the old account", () => {
-    const missing = [...accountScopedTables()]
-      .filter((table) => !tablesWithoutDomainData.has(table))
-      .filter((table) => !new RegExp(`from\\s+${table}\\s+where\\s+account_id\\s*=\\s*v_old_account_id`, "i").test(body));
-    expect(missing).toEqual([]);
+  it("never moves the caller's profile or deletes any account", () => {
+    expect(body).not.toMatch(/update\s+profiles/i);
+    expect(body).not.toMatch(/delete\s+from\s+accounts/i);
   });
 
-  it("refuses when the old account has other members", () => {
-    expect(body).toMatch(/from\s+profiles\s+where\s+account_id\s*=\s*v_old_account_id\s+and\s+user_id\s*<>\s*v_caller_id/i);
+  it("refuses an existing (active or suspended) membership in the invited account", () => {
+    expect(body).toMatch(/from\s+account_memberships/i);
+    expect(body).toMatch(/already a member of this account/i);
+    expect(body).toMatch(/suspended/i);
+  });
+
+  it("locks the invitation row so one token cannot be redeemed twice", () => {
+    expect(body).toMatch(/from\s+account_invitations\s+where\s+token_hash\s*=\s*p_token_hash\s+for\s+update/i);
   });
 });
 

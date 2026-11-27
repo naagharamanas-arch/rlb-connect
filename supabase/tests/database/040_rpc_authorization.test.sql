@@ -69,9 +69,15 @@ select is(tests.probe_val(null, 'public.peek_invitation(''no-such-hash'')::jsonb
 
 -- redeem
 select is(tests.probe_effect(tests.u('c_user'), 'select public.redeem_invitation(''inv-hash-a'')',
-          format('select (account_id = %L)::text || ''/'' || account_role::text from public.profiles where user_id = %L', tests.u('a_acct'), tests.u('c_user'))),
-          'val=true/agent', 'POSITIVE CONTROL: a fresh user redeems a valid invitation and joins ONLY the inviting account, with exactly the invited role');
-select ok(tests.probe_val(tests.u('b_owner'), 'public.redeem_invitation(''inv-hash-a'')') ~ '^err=', 'a user who already has data cannot be pulled into A (their data stays put)');
+          format('select (p.account_id <> %1$L)::text || ''/'' || m.role::text from public.profiles p join public.account_memberships m on m.user_id = p.user_id and m.account_id = %1$L where p.user_id = %2$L', tests.u('a_acct'), tests.u('c_user'))),
+          'val=true/agent', 'POSITIVE CONTROL: a fresh user redeems a valid invitation and gets a membership in the inviting account with exactly the invited role; their profile/default account is NOT moved');
+select is(tests.probe_effect(tests.u('b_owner'), 'select public.redeem_invitation(''inv-hash-a'')',
+          format('select (p.account_id = %1$L)::text || ''/'' || m.role::text || ''/'' || (exists (select 1 from public.accounts where id = %1$L))::text from public.profiles p join public.account_memberships m on m.user_id = p.user_id and m.account_id = %2$L where p.user_id = %3$L', tests.u('b_acct'), tests.u('a_acct'), tests.u('b_owner'))),
+          'val=true/agent/true', 'a user who already has data joins A as a second workspace: their own account and profile stay untouched');
+select ok(tests.probe_val(tests.u('a_agent'), 'public.redeem_invitation(''inv-hash-a'')') ~ '^err=', 'an existing active member cannot redeem an invitation to the same account');
+update public.account_memberships set status = 'suspended' where account_id = tests.u('a_acct') and user_id = tests.u('a_viewer');
+select ok(tests.probe_val(tests.u('a_viewer'), 'public.redeem_invitation(''inv-hash-a'')') ~ '^err=', 'a suspended member cannot re-activate themselves with an invitation');
+update public.account_memberships set status = 'active' where account_id = tests.u('a_acct') and user_id = tests.u('a_viewer');
 select ok(tests.probe_val(tests.u('c_user'), 'public.redeem_invitation(''no-such-hash'')') ~ '^err=', 'redeeming an unknown token fails');
 select is(tests.probe_val(null, 'public.redeem_invitation(''inv-hash-a'')'), 'err=42501', 'anon cannot execute redeem_invitation');
 
