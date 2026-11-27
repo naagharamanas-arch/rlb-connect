@@ -71,5 +71,10 @@ delete from public.account_memberships where account_id = tests.u('a_acct') and 
 select is(tests.probe_val(tests.u('b_owner'), format('public.transfer_account_ownership(%L, %L)', tests.u('a_acct'), tests.u('a_admin'))) ~ '^err=', true, 'a foreign owner cannot transfer A');
 select is(tests.probe_val(null, format('public.transfer_account_ownership(%L, %L)', tests.u('a_acct'), tests.u('a_admin'))), 'err=42501', 'anon cannot call transfer_account_ownership');
 
+-- an unknown user id keeps the pre-069 contract (22023 -> HTTP 400), not a 403
+select is(tests.probe_val(tests.u('a_admin'), format('public.remove_account_member(%L, %L)', tests.u('a_acct'), '00000000-0000-4000-8000-000000000000')), 'err=22023', 'removing an unknown user id is 22023, not 42501');
+select is(tests.probe_val(tests.u('a_admin'), format('public.set_member_role(%L, %L, ''viewer'')', tests.u('a_acct'), '00000000-0000-4000-8000-000000000000')), 'err=22023', 'changing the role of an unknown user id is 22023');
+select is(tests.probe_val(tests.u('a_owner'), format('public.transfer_account_ownership(%L, %L)', tests.u('a_acct'), '00000000-0000-4000-8000-000000000000')), 'err=22023', 'transferring to an unknown user id is 22023');
+
 select * from finish();
 rollback;
