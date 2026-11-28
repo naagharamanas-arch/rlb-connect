@@ -233,7 +233,8 @@ insert into tests.table_class (tbl, class) values
   ('member_presence','tenant'), ('api_keys','tenant'), ('notifications','tenant'),
   ('webhook_endpoints','tenant'), ('ai_configs','tenant'), ('ai_knowledge_documents','tenant'),
   ('ai_knowledge_chunks','tenant'), ('ai_usage_log','tenant'), ('quick_replies','tenant'),
-  ('pending_message_statuses','tenant'), ('realtime_deletions','tenant');
+  ('pending_message_statuses','tenant'), ('realtime_deletions','tenant'),
+  ('account_memberships','tenant');
 
 insert into tests.table_class (tbl, class, fk_col, parent) values
   ('messages','child','conversation_id','conversations'),
@@ -307,6 +308,11 @@ insert into tests.role_expect (tbl, op, min_rank) values
   ('ai_configs','SELECT',1),      ('ai_configs','INSERT',3),      ('ai_configs','UPDATE',3),      ('ai_configs','DELETE',3),
   ('api_keys','SELECT',1),        ('api_keys','INSERT',3),        ('api_keys','UPDATE',3),        ('api_keys','DELETE',3),
   ('webhook_endpoints','SELECT',1),('webhook_endpoints','INSERT',3),('webhook_endpoints','UPDATE',3),('webhook_endpoints','DELETE',3);
+
+-- Memberships: members read their account's rows; nobody but the service role writes.
+insert into tests.role_expect (tbl, op, min_rank) values
+  ('account_memberships','SELECT',1), ('account_memberships','INSERT',null),
+  ('account_memberships','UPDATE',null), ('account_memberships','DELETE',null);
 
 -- notifications and profiles are keyed on auth.uid(), not on role: tested
 -- explicitly in 030, so they carry no role_expect rows.
@@ -475,5 +481,5 @@ create function tests.u(p_name text) returns uuid language sql stable as $$ sele
 
 select plan(2);
 select ok(true, 'helpers installed');
-select is((select count(*) from tests.table_class)::int, 38, 'classification lists 38 tables');
+select is((select count(*) from tests.table_class)::int, 39, 'classification lists 39 tables');
 select * from finish();

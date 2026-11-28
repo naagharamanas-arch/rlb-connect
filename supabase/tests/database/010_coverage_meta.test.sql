@@ -80,6 +80,7 @@ insert into allow_anon values
 create temp table allow_auth (fn text primary key, why text);
 insert into allow_auth select fn, why from allow_anon;
 insert into allow_auth values
+  ('has_account_access',              'membership check for auth.uid(); returns false when there is none (see 110)'),
   ('set_member_role',                  'caller must be admin/owner of the target''s account (see 040)'),
   ('remove_account_member',            'same-account admin/owner only (see 040)'),
   ('transfer_account_ownership',       'owner only (see 040)'),
