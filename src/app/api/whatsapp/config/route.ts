@@ -33,6 +33,7 @@ import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit
 import { getT } from '@/lib/i18n/translate'
 import { fetchWhatsAppConfig } from '@/lib/credentials/server'
 import { classifyPhoneKind } from '@/lib/whatsapp/connection-status'
+import { findPhoneClaimByOtherAccount } from '@/lib/whatsapp/claim'
 import { isStatusV2Enabled } from '@/lib/whatsapp/status-flag'
 
 const t = getT('Api')
@@ -327,12 +328,13 @@ export async function POST(request: Request) {
     // inbound message. See issue #136. Post-multi-user we key on
     // account_id (not user_id) since teammates inside the same account
     // all share one config; the conflict is between accounts.
-    const { data: claimed, error: claimedError } = await supabaseAdmin()
-      .from('whatsapp_config')
-      .select('account_id')
-      .eq('phone_number_id', phone_number_id)
-      .neq('account_id', accountId)
-      .maybeSingle()
+    // The query itself lives in lib/whatsapp/claim.ts (shared with the
+    // Embedded Signup flow); behaviour here is unchanged.
+    const { claimed, error: claimedError } = await findPhoneClaimByOtherAccount({
+      admin: supabaseAdmin(),
+      phoneNumberId: phone_number_id,
+      accountId,
+    })
 
     if (claimedError) {
       console.error('Error checking phone_number_id ownership:', claimedError)

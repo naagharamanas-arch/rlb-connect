@@ -15,6 +15,9 @@ const REQUIRED = [
   'META_APP_SECRET',
 ] as const
 
+/** Required only when ES_CONNECT_ENABLED=1. */
+const ES_REQUIRED = ['META_APP_ID', 'META_ES_APP_SECRET', 'META_ES_CONFIG_ID'] as const
+
 function isHttpUrl(value: string): boolean {
   try {
     const u = new URL(value)
@@ -54,6 +57,24 @@ export function validateEnv(
   const cron = env.AUTOMATION_CRON_SECRET
   if (cron !== undefined && cron.trim().length > 0 && cron.length < 16) {
     problems.push({ name: 'AUTOMATION_CRON_SECRET', problem: 'must be at least 16 characters' })
+  }
+
+  // Embedded Signup (docs/architecture/09, S1): only validated when the flag
+  // is on, so an unconfigured deployment is unaffected. Names only, no values.
+  if (env.ES_CONNECT_ENABLED === '1') {
+    for (const name of ES_REQUIRED) {
+      if (!env[name]?.trim()) {
+        problems.push({ name, problem: 'is required when ES_CONNECT_ENABLED=1' })
+      }
+    }
+    const appId = env.META_APP_ID?.trim()
+    if (appId && !/^\d+$/.test(appId)) {
+      problems.push({ name: 'META_APP_ID', problem: 'must be digits only' })
+    }
+    const configId = env.META_ES_CONFIG_ID?.trim()
+    if (configId && !/^\d+$/.test(configId)) {
+      problems.push({ name: 'META_ES_CONFIG_ID', problem: 'must be digits only' }) // (verify) config ids are numeric
+    }
   }
 
   return problems

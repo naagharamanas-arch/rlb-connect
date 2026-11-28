@@ -42,3 +42,33 @@ describe('validateEnv', () => {
     expect(validateEnv({ ...GOOD, AUTOMATION_CRON_SECRET: 'x'.repeat(32) })).toEqual([])
   })
 })
+
+describe('validateEnv — Embedded Signup (only when ES_CONNECT_ENABLED=1)', () => {
+  const ES_ON = { ...GOOD, ES_CONNECT_ENABLED: '1' }
+  const ES_GOOD = {
+    ...ES_ON,
+    META_APP_ID: '972901605572832',
+    META_ES_APP_SECRET: 'es-secret-value',
+    META_ES_CONFIG_ID: '123456789',
+  }
+
+  it('ignores ES variables entirely while the flag is off', () => {
+    expect(validateEnv(GOOD)).toEqual([])
+    expect(validateEnv({ ...GOOD, ES_CONNECT_ENABLED: '0', META_APP_ID: 'junk' })).toEqual([])
+  })
+
+  it('requires the three ES variables when the flag is on', () => {
+    expect(validateEnv(ES_ON).map((p) => p.name)).toEqual([
+      'META_APP_ID',
+      'META_ES_APP_SECRET',
+      'META_ES_CONFIG_ID',
+    ])
+    expect(validateEnv(ES_GOOD)).toEqual([])
+  })
+
+  it('rejects non-numeric ids without echoing any value', () => {
+    const problems = validateEnv({ ...ES_GOOD, META_APP_ID: 'abc', META_ES_CONFIG_ID: 'x1' })
+    expect(problems.map((p) => p.name)).toEqual(['META_APP_ID', 'META_ES_CONFIG_ID'])
+    expect(JSON.stringify(problems)).not.toContain('es-secret-value')
+  })
+})

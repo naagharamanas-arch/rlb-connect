@@ -123,4 +123,8 @@ jobs:
           # re-applying 061 over legacy grants revokes that grant (same reason as 065).
           # 067 is idempotent (IF NOT EXISTS / CREATE OR REPLACE / ON CONFLICT).
           bash supabase/ci/apply-sql.sh supabase/migrations/067_account_memberships.sql
+          # 070 creates whatsapp_signup_sessions and grants it explicitly; 061 predates it, so
+          # re-applying 061 over legacy grants revokes that grant (same reason as 065/067).
+          # 070 is idempotent (IF NOT EXISTS / DROP POLICY IF EXISTS / REVOKE+GRANT).
+          bash supabase/ci/apply-sql.sh supabase/migrations/070_whatsapp_signup_sessions.sql
           supabase test db --local

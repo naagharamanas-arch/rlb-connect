@@ -32,6 +32,11 @@ const ti = getT('Validation.interactive')
  *   changelog entries for v22–v26 first (template category handling,
  *   messaging-limit semantics, status-webhook payload and media-retention
  *   changes).
+ *
+ *   (verify) Decision 2026-11-28: S1 keeps v21.0. Follow-up R2 — a separate PR,
+ *   done BEFORE the S2 runtime test — bumps it. Take the target from Meta's
+ *   LIVE Graph versions table, not from a search result or this comment
+ *   (Meta's dialog URL already showed v27.0, so v26.0 is not the latest).
  */
 export const META_API_VERSION = 'v21.0'
 export const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
@@ -409,6 +414,226 @@ export async function getSubscribedApps(
   }
   const data = (await response.json()) as { data?: SubscribedApp[] }
   return data.data ?? []
+}
+
+// ============================================================
+// Embedded Signup helpers (docs/architecture/09, slice S1)
+// ============================================================
+//
+// Server-side only, not called by any route yet (S1 is inert). All of them
+// use META_API_BASE — the single Graph version constant. Every Graph path,
+// parameter and field name below that is not already used elsewhere in this
+// file is UNVERIFIED against the current Meta docs and marked "(verify)";
+// re-read the docs before the slice that wires them (S2).
+//
+// Secrets: the app id and the Embedded Signup app secret are read from the
+// environment at CALL time (never at import, never hardcoded). No function
+// here puts the code, a token or the secret into an error message or a log
+// line; Meta's own error envelope (message/code/fbtrace_id) is passed through
+// `readMetaError` exactly like every other helper.
+
+/** Env var names for the Embedded Signup app (values are never exposed). */
+const ES_APP_ID_ENV = 'META_APP_ID'
+const ES_APP_SECRET_ENV = 'META_ES_APP_SECRET'
+
+function readEsAppCredentials(): { appId: string; appSecret: string } {
+  const appId = process.env[ES_APP_ID_ENV]?.trim()
+  const appSecret = process.env[ES_APP_SECRET_ENV]?.trim()
+  // Name the variable only — never the value.
+  if (!appId) throw new Error(`${ES_APP_ID_ENV} is not set`)
+  if (!appSecret) throw new Error(`${ES_APP_SECRET_ENV} is not set`)
+  return { appId, appSecret }
+}
+
+export interface ExchangeCodeForTokenArgs {
+  /** The single-use `code` returned by FB.login. Never logged or stored. */
+  code: string
+}
+
+export interface ExchangeCodeForTokenResult {
+  accessToken: string
+  tokenType: string | null
+  /** Seconds until expiry when Meta reports one (verify: business tokens may omit it). */
+  expiresInSeconds: number | null
+}
+
+/**
+ * Exchange the Embedded Signup `code` for a business token, server-side.
+ *
+ * GET {graph}/oauth/access_token?client_id&client_secret&code (verify; also
+ * verify whether `redirect_uri` is required for the JS-SDK flow). The code is
+ * single-use and very short-lived: call this before any other await.
+ */
+export async function exchangeCodeForToken(
+  args: ExchangeCodeForTokenArgs
+): Promise<ExchangeCodeForTokenResult> {
+  const { appId, appSecret } = readEsAppCredentials()
+  const params = new URLSearchParams({
+    client_id: appId,
+    client_secret: appSecret,
+    code: args.code,
+  })
+  const response = await fetch(`${META_API_BASE}/oauth/access_token?${params.toString()}`)
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json().catch(() => null)) as {
+    access_token?: unknown
+    token_type?: unknown
+    expires_in?: unknown
+  } | null
+  if (!data || typeof data.access_token !== 'string' || data.access_token === '') {
+    throw new Error('Meta token exchange returned no access token')
+  }
+  return {
+    accessToken: data.access_token,
+    tokenType: typeof data.token_type === 'string' ? data.token_type : null,
+    expiresInSeconds: typeof data.expires_in === 'number' ? data.expires_in : null,
+  }
+}
+
+export interface DebugTokenArgs {
+  /** The business token to inspect. */
+  inputToken: string
+}
+
+export interface DebugTokenGranularScope {
+  scope: string
+  /** Object ids (e.g. WABA ids) the scope is granted on (verify shape). */
+  targetIds: string[]
+}
+
+export interface DebugTokenResult {
+  appId: string | null
+  isValid: boolean
+  type: string | null
+  scopes: string[]
+  granularScopes: DebugTokenGranularScope[]
+  /** Unix seconds; 0/absent means "does not expire" (verify). */
+  expiresAt: number | null
+}
+
+/**
+ * Inspect a token with an app access token (`{app_id}|{app_secret}`, verify).
+ * The caller must check `appId` equals ours and that the granular scopes list
+ * the WABA before trusting anything the browser sent.
+ */
+export async function debugToken(args: DebugTokenArgs): Promise<DebugTokenResult> {
+  const { appId, appSecret } = readEsAppCredentials()
+  const params = new URLSearchParams({
+    input_token: args.inputToken,
+    access_token: `${appId}|${appSecret}`,
+  })
+  const response = await fetch(`${META_API_BASE}/debug_token?${params.toString()}`)
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const body = (await response.json().catch(() => null)) as {
+    data?: {
+      app_id?: unknown
+      is_valid?: unknown
+      type?: unknown
+      scopes?: unknown
+      granular_scopes?: unknown
+      expires_at?: unknown
+    }
+  } | null
+  const d = body?.data
+  if (!d || typeof d !== 'object') {
+    throw new Error('Meta debug_token returned no data')
+  }
+  const granular: DebugTokenGranularScope[] = Array.isArray(d.granular_scopes)
+    ? (d.granular_scopes as Array<{ scope?: unknown; target_ids?: unknown }>)
+        .filter((g) => typeof g?.scope === 'string')
+        .map((g) => ({
+          scope: g.scope as string,
+          targetIds: Array.isArray(g.target_ids)
+            ? g.target_ids.filter((t): t is string => typeof t === 'string')
+            : [],
+        }))
+    : []
+  return {
+    appId: typeof d.app_id === 'string' ? d.app_id : null,
+    isValid: d.is_valid === true,
+    type: typeof d.type === 'string' ? d.type : null,
+    scopes: Array.isArray(d.scopes)
+      ? d.scopes.filter((s): s is string => typeof s === 'string')
+      : [],
+    granularScopes: granular,
+    expiresAt: typeof d.expires_at === 'number' ? d.expires_at : null,
+  }
+}
+
+export interface GetWabaPhoneNumberDetailsArgs {
+  wabaId: string
+  accessToken: string
+}
+
+export interface WabaPhoneNumberDetails extends WabaPhoneNumber {
+  /**
+   * Meta's platform classification for the number (e.g. Cloud API vs. WhatsApp
+   * Business app / coexistence). Field name and values are UNVERIFIED (verify);
+   * null when Meta does not return it on this Graph version.
+   */
+  platformType: string | null
+}
+
+/**
+ * The numbers under a WABA with the extra detail Embedded Signup needs to
+ * classify path A vs B. `platform_type` (verify) is requested in a request
+ * of its own: if this Graph version rejects the unknown field the call falls
+ * back to the base fields (platformType null) instead of failing the connect —
+ * the same defensive pattern as `getPhoneConnectionKind`.
+ */
+export async function getWabaPhoneNumberDetails(
+  args: GetWabaPhoneNumberDetailsArgs
+): Promise<WabaPhoneNumberDetails[]> {
+  const { wabaId, accessToken } = args
+  const headers = { Authorization: `Bearer ${accessToken}` }
+  const base = `${META_API_BASE}/${wabaId}/phone_numbers`
+  const extended = await fetch(
+    `${base}?fields=id,display_phone_number,verified_name,platform_type&limit=100`, // platform_type (verify)
+    { headers }
+  )
+  if (extended.ok) {
+    const data = (await extended.json().catch(() => null)) as {
+      data?: Array<WabaPhoneNumber & { platform_type?: unknown }>
+    } | null
+    return (data?.data ?? []).map((n) => ({
+      id: n.id,
+      display_phone_number: n.display_phone_number,
+      verified_name: n.verified_name,
+      platformType: typeof n.platform_type === 'string' ? n.platform_type : null,
+    }))
+  }
+  if (extended.status !== 400) {
+    await throwMetaError(extended, `Meta API error: ${extended.status}`)
+  }
+  const numbers = await listWabaPhoneNumbers({ wabaId, accessToken })
+  return numbers.map((n) => ({ ...n, platformType: null }))
+}
+
+export interface UnsubscribeWabaFromAppArgs {
+  wabaId: string
+  accessToken: string
+}
+
+/**
+ * Remove this app's webhook subscription from the WABA (disconnect).
+ * DELETE {graph}/{waba}/subscribed_apps (verify). Best-effort at the caller:
+ * a failure here must not block the local disconnect.
+ */
+export async function unsubscribeWabaFromApp(
+  args: UnsubscribeWabaFromAppArgs
+): Promise<void> {
+  const { wabaId, accessToken } = args
+  const response = await fetch(`${META_API_BASE}/${wabaId}/subscribed_apps`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
 }
 
 // ============================================================

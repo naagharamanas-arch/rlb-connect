@@ -234,7 +234,7 @@ insert into tests.table_class (tbl, class) values
   ('webhook_endpoints','tenant'), ('ai_configs','tenant'), ('ai_knowledge_documents','tenant'),
   ('ai_knowledge_chunks','tenant'), ('ai_usage_log','tenant'), ('quick_replies','tenant'),
   ('pending_message_statuses','tenant'), ('realtime_deletions','tenant'),
-  ('account_memberships','tenant');
+  ('account_memberships','tenant'), ('whatsapp_signup_sessions','tenant');
 
 insert into tests.table_class (tbl, class, fk_col, parent) values
   ('messages','child','conversation_id','conversations'),
@@ -313,6 +313,12 @@ insert into tests.role_expect (tbl, op, min_rank) values
 insert into tests.role_expect (tbl, op, min_rank) values
   ('account_memberships','SELECT',1), ('account_memberships','INSERT',null),
   ('account_memberships','UPDATE',null), ('account_memberships','DELETE',null);
+
+-- Embedded Signup sessions (070): members read their account's rows (state_hash is
+-- column-withheld); nobody but the service role writes. Asserted in 120.
+insert into tests.role_expect (tbl, op, min_rank) values
+  ('whatsapp_signup_sessions','SELECT',1), ('whatsapp_signup_sessions','INSERT',null),
+  ('whatsapp_signup_sessions','UPDATE',null), ('whatsapp_signup_sessions','DELETE',null);
 
 -- notifications and profiles are keyed on auth.uid(), not on role: tested
 -- explicitly in 030, so they carry no role_expect rows.
@@ -436,6 +442,8 @@ begin
   insert into ai_usage_log (account_id, mode, provider, model) values (p_acct, 'draft', 'openai', 'test-model');
   insert into quick_replies (account_id, user_id, title, content_text) values (p_acct, p_owner, 'qr-' || p_label, 'hi');
   insert into pending_message_statuses (account_id, wamid, status) values (p_acct, 'wamid-' || p_label, 'delivered');
+  insert into whatsapp_signup_sessions (account_id, user_id, state_hash, expires_at)
+  values (p_acct, p_owner, 'state-hash-' || p_label || '-' || gen_random_uuid(), now() + interval '10 minutes');
 
   -- ids the RPC / storage tests need
   perform set_config('tests.' || p_label || '_contact', v_contact::text, true);
@@ -481,5 +489,5 @@ create function tests.u(p_name text) returns uuid language sql stable as $$ sele
 
 select plan(2);
 select ok(true, 'helpers installed');
-select is((select count(*) from tests.table_class)::int, 39, 'classification lists 39 tables');
+select is((select count(*) from tests.table_class)::int, 40, 'classification lists 40 tables');
 select * from finish();
