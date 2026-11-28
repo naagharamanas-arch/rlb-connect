@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 let callerRole = 'admin'
 let signedIn = true
@@ -114,6 +114,7 @@ const meta = vi.hoisted(() => ({
   registerPhoneNumber: vi.fn(async () => ({ success: true })),
   subscribeWabaToApp: vi.fn(async () => ({ success: true })),
   getSubscribedApps: vi.fn(async () => []),
+  getPhoneConnectionKind: vi.fn(async () => ({})),
 }))
 vi.mock('@/lib/whatsapp/meta-api', () => meta)
 
@@ -142,7 +143,8 @@ function metaCallCount() {
     meta.listWabaPhoneNumbers.mock.calls.length +
     meta.registerPhoneNumber.mock.calls.length +
     meta.subscribeWabaToApp.mock.calls.length +
-    meta.getSubscribedApps.mock.calls.length
+    meta.getSubscribedApps.mock.calls.length +
+    meta.getPhoneConnectionKind.mock.calls.length
   )
 }
 
@@ -275,5 +277,80 @@ describe('GET /api/whatsapp/config', () => {
     expect(body.connected).toBe(true)
     expect(JSON.stringify(body)).not.toContain('plaintext-token')
     expect(JSON.stringify(body)).not.toContain('enc-token')
+  })
+})
+
+describe('WA_STATUS_V2 (connection_kind)', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('flag OFF (default): GET response has exactly the legacy keys and no Meta kind call is made', async () => {
+    storedConfig = STORED_CONFIG
+    const res = await GET()
+    const body = await res.json()
+    expect(Object.keys(body).sort()).toEqual(['connected', 'phone_info', 'waba_subscription'])
+    expect(meta.getPhoneConnectionKind).not.toHaveBeenCalled()
+  })
+
+  it('flag set to something other than "1" stays OFF', async () => {
+    vi.stubEnv('WA_STATUS_V2', 'true')
+    storedConfig = STORED_CONFIG
+    const body = await (await GET()).json()
+    expect('connection_kind' in body).toBe(false)
+    expect(meta.getPhoneConnectionKind).not.toHaveBeenCalled()
+  })
+
+  it('flag ON: coexistence number is reported as coexistence', async () => {
+    vi.stubEnv('WA_STATUS_V2', '1')
+    storedConfig = STORED_CONFIG
+    meta.getPhoneConnectionKind.mockResolvedValueOnce({ isOnBizApp: true, platformType: 'CLOUD_API' })
+    const body = await (await GET()).json()
+    expect(body.connected).toBe(true)
+    expect(body.connection_kind).toBe('coexistence')
+    expect(meta.getPhoneConnectionKind).toHaveBeenCalledWith({
+      phoneNumberId: '111222333',
+      accessToken: 'plaintext-token',
+    })
+    expect(JSON.stringify(body)).not.toContain('plaintext-token')
+  })
+
+  it('flag ON: test number, cloud_api and unknown are classified from Meta facts', async () => {
+    vi.stubEnv('WA_STATUS_V2', '1')
+    storedConfig = STORED_CONFIG
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ accountMode: 'SANDBOX' }, 'test_number'],
+      [{ isOnBizApp: false, platformType: 'CLOUD_API' }, 'cloud_api'],
+      [{}, 'unknown'],
+    ]
+    for (const [facts, want] of cases) {
+      meta.getPhoneConnectionKind.mockResolvedValueOnce(facts)
+      expect((await (await GET()).json()).connection_kind).toBe(want)
+    }
+  })
+
+  it('flag ON: no kind is asked when the credentials themselves fail', async () => {
+    vi.stubEnv('WA_STATUS_V2', '1')
+    storedConfig = STORED_CONFIG
+    meta.verifyPhoneNumber.mockRejectedValueOnce(new Error('expired token'))
+    const body = await (await GET()).json()
+    expect(body.connected).toBe(false)
+    expect('connection_kind' in body).toBe(false)
+    expect(meta.getPhoneConnectionKind).not.toHaveBeenCalled()
+  })
+
+  it('POST flag OFF: response has no connection_kind', async () => {
+    const body = await (await saveConfig()).json()
+    expect(body.success).toBe(true)
+    expect('connection_kind' in body).toBe(false)
+    expect(meta.getPhoneConnectionKind).not.toHaveBeenCalled()
+  })
+
+  it('POST flag ON, no PIN, coexistence number: still saves WITHOUT /register and reports the kind', async () => {
+    vi.stubEnv('WA_STATUS_V2', '1')
+    meta.getPhoneConnectionKind.mockResolvedValueOnce({ isOnBizApp: true })
+    const body = await (await saveConfig({ pin: undefined })).json()
+    expect(body.success).toBe(true)
+    expect(body.registration_skipped).toBe(true)
+    expect(body.connection_kind).toBe('coexistence')
+    expect(meta.registerPhoneNumber).not.toHaveBeenCalled()
   })
 })

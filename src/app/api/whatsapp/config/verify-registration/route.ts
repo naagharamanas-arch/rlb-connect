@@ -2,12 +2,15 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
+  getPhoneConnectionKind,
   getSubscribedApps,
   verifyPhoneNumber,
 } from '@/lib/whatsapp/meta-api'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { getT } from '@/lib/i18n/translate'
 import { fetchWhatsAppConfig } from '@/lib/credentials/server'
+import { classifyPhoneKind, requiresLocalRegistration } from '@/lib/whatsapp/connection-status'
+import { isStatusV2Enabled } from '@/lib/whatsapp/status-flag'
 
 const t = getT('Api')
 
@@ -142,6 +145,43 @@ export async function GET() {
     errors.push(
       t('whatsappConfig.noWabaId'),
     )
+  }
+
+  // WA_STATUS_V2 only: a Coexistence or Meta test number has no local
+  // /register step, so `registered_at` is NULL by design and must not make
+  // the number "not live". Flag off = the original formula, response
+  // untouched.
+  if (isStatusV2Enabled()) {
+    const kind = classifyPhoneKind(
+      await getPhoneConnectionKind({ phoneNumberId: config.phone_number_id, accessToken }),
+    )
+    if (!requiresLocalRegistration(kind)) {
+      const { locally_marked_registered: _omitted, ...v2Checks } = checks
+      void _omitted
+      const liveV2 = checks.phone_metadata_ok && (checks.waba_subscribed_to_app ?? false)
+      return NextResponse.json({
+        live: liveV2,
+        checks: v2Checks,
+        errors,
+        connection_kind: kind,
+        last_registration_error: config.last_registration_error ?? null,
+        registered_at: config.registered_at ?? null,
+        subscribed_apps_at: config.subscribed_apps_at ?? null,
+      })
+    }
+    const liveCloud =
+      checks.phone_metadata_ok &&
+      (checks.waba_subscribed_to_app ?? false) &&
+      checks.locally_marked_registered
+    return NextResponse.json({
+      live: liveCloud,
+      checks,
+      errors,
+      connection_kind: kind,
+      last_registration_error: config.last_registration_error ?? null,
+      registered_at: config.registered_at ?? null,
+      subscribed_apps_at: config.subscribed_apps_at ?? null,
+    })
   }
 
   const live =

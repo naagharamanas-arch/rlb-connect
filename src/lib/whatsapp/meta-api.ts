@@ -10,6 +10,7 @@
  */
 
 import { isBusinessScopedUserId } from './wa-identity'
+import type { RawPhoneConnectionFacts } from './connection-status'
 import { getT } from '@/lib/i18n/translate'
 import { INTERACTIVE_LIMITS } from './interactive-limits'
 import { resolveMediaLinkForMeta } from '@/lib/storage/media-server'
@@ -186,6 +187,43 @@ export async function getPhoneNumberHealth(
     }
   }
   return health
+}
+
+/**
+ * Best-effort, read-only: which kind of number is this? (Coexistence / test /
+ * Cloud API.) Used only for the Settings status display (WA_STATUS_V2).
+ *
+ * Each field is requested on its OWN request: Graph answers a whole request
+ * with error #100 when a single field name is unknown on the pinned version,
+ * and one unsupported field must never take the others (or the existing
+ * verify call) down. Never throws; a field that could not be read is absent.
+ * Field names are (verify) against the current Meta docs.
+ */
+export async function getPhoneConnectionKind(
+  args: VerifyPhoneNumberArgs
+): Promise<RawPhoneConnectionFacts> {
+  const { phoneNumberId, accessToken } = args
+  const headers = { Authorization: `Bearer ${accessToken}` }
+  const read = async (field: string): Promise<unknown> => {
+    try {
+      const response = await fetch(`${META_API_BASE}/${phoneNumberId}?fields=${field}`, { headers })
+      if (!response.ok) return undefined
+      const data = (await response.json()) as Record<string, unknown>
+      return data?.[field]
+    } catch {
+      return undefined
+    }
+  }
+  const [platformType, isOnBizApp, accountMode] = await Promise.all([
+    read('platform_type'),
+    read('is_on_biz_app'),
+    read('account_mode'),
+  ])
+  return {
+    platformType: typeof platformType === 'string' ? platformType : null,
+    isOnBizApp: typeof isOnBizApp === 'boolean' ? isOnBizApp : null,
+    accountMode: typeof accountMode === 'string' ? accountMode : null,
+  }
 }
 
 // ============================================================
