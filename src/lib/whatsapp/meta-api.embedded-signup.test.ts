@@ -23,7 +23,7 @@ function badJson(status = 200): Response {
     json: async () => {
       throw new Error('not json')
     },
-  } as Response
+  } as unknown as Response
 }
 const errEnvelope = (message: string, code = 190) => ({
   error: { message, code, type: 'OAuthException', fbtrace_id: 'trace1' },

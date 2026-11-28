@@ -52,7 +52,7 @@ async function setup(opts: {
     now: () => new Date(T0.getTime() + 1000),
   }
   const input: FinishInput = { state: created.state, code: CODE, callerUserId: 'user-1' }
-  return { deps, input, sessions, connections, meta: meta as Record<string, ReturnType<typeof vi.fn>> }
+  return { deps, input, sessions, connections, meta: meta as unknown as Record<string, ReturnType<typeof vi.fn>> }
 }
 
 function noSecrets(value: unknown) {
