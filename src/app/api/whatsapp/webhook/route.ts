@@ -19,6 +19,16 @@ import {
   verifyTokenMatches,
 } from '@/lib/whatsapp/webhook-signature'
 import { readCappedBody } from '@/lib/whatsapp/webhook-body'
+import {
+  resolveTenantForPhoneNumber,
+  type PhoneConfigRow,
+} from '@/lib/whatsapp/webhook-routing'
+import {
+  checkRateLimit,
+  getClientIp,
+  rateLimitResponse,
+  RATE_LIMITS,
+} from '@/lib/rate-limit'
 import { resumeAwaitingReply, runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
@@ -172,10 +182,22 @@ export async function GET(request: Request) {
       )
     }
 
-    // Fetch all whatsapp configs to check verify tokens
+    // The handshake is unauthenticated and every attempt reads and decrypts
+    // tenants' verify tokens. Bound guessing/amplification per client IP
+    // before touching the database. Parameter-shape rejections above are
+    // free (no DB), so they are not counted.
+    const limit = checkRateLimit(
+      `whatsapp-webhook-verify:${getClientIp(request)}`,
+      RATE_LIMITS.webhookVerify
+    )
+    if (!limit.success) return rateLimitResponse(limit)
+
+    // Fetch the configs that actually hold a verify token (rows without one
+    // can never match) to check against the presented token.
     const { data: configs, error: configError } = await supabaseAdmin()
       .from('whatsapp_config')
       .select('id, verify_token')
+      .not('verify_token', 'is', null)
 
     if (configError || !configs) {
       console.error('Error fetching configs for verification:', configError)
@@ -290,26 +312,106 @@ export async function POST(request: Request) {
   return NextResponse.json({ status: 'received' }, { status: 200 })
 }
 
+/**
+ * The `whatsapp_config` columns the inbound path reads once a message has been
+ * routed to a workspace (the row is fetched with `select('*')` by the
+ * service-role client, which has no generated types).
+ */
+interface InboundConfigRow extends PhoneConfigRow {
+  user_id: string
+  access_token: string
+  mirror_inbound_media?: boolean | null
+}
+
+/**
+ * Transitional: rows saved before the WABA id was recorded have a NULL
+ * waba_id and cannot be cross-checked. They are still routed (on the unique
+ * phone_number_id) with a warning until the staging/production data has been
+ * audited and backfilled. Set WHATSAPP_REQUIRE_STORED_WABA=1 to fail closed
+ * on them too. A missing entry.id or a mismatch always fails closed.
+ */
+function routingOptions() {
+  return { allowLegacyNullWaba: process.env.WHATSAPP_REQUIRE_STORED_WABA !== '1' }
+}
+
 async function resolveAccountForPhoneNumber(
-  phoneNumberId: string | undefined
+  phoneNumberId: string | undefined,
+  entryWabaId: string | undefined
 ): Promise<string | null> {
-  if (!phoneNumberId) return null
+  if (!phoneNumberId) {
+    console.warn(
+      `[webhook] Status update without metadata.phone_number_id (WABA ${entryWabaId ?? 'unknown'}); dropped, no workspace can be determined.`
+    )
+    return null
+  }
   const { data, error } = await supabaseAdmin()
     .from('whatsapp_config')
-    .select('account_id')
+    .select('account_id, waba_id')
     .eq('phone_number_id', phoneNumberId)
 
   if (error) {
     console.error('Error resolving account for status update:', phoneNumberId, error)
     return null
   }
-  if (!data || data.length !== 1) {
-    console.error(
-      `Status update for phone_number_id ${phoneNumberId} matched ${data?.length ?? 0} configs; message statuses skipped`
-    )
+  // Same tenant decision as inbound messages: the phone number must map to
+  // exactly one workspace AND the envelope's WABA must agree with it.
+  const resolution = resolveTenantForPhoneNumber(data, entryWabaId, routingOptions())
+  if (!resolution.ok) {
+    logTenantRoutingFailure('Status update', phoneNumberId, entryWabaId, resolution)
     return null
   }
-  return data[0].account_id
+  warnIfWabaUnverified('Status update', phoneNumberId, resolution.wabaVerified)
+  return resolution.config.account_id
+}
+
+/**
+ * One log line per rejected routing decision. Ids only (Meta phone number /
+ * WABA ids and our own account ids) — never tokens or message content.
+ */
+function logTenantRoutingFailure(
+  what: string,
+  phoneNumberId: string | undefined,
+  entryWabaId: string | undefined,
+  resolution: Exclude<ReturnType<typeof resolveTenantForPhoneNumber>, { ok: true }>
+) {
+  switch (resolution.reason) {
+    case 'waba_mismatch':
+      console.error(
+        `[webhook] ${what} rejected: phone_number_id ${phoneNumberId} is registered to WABA ${resolution.configWabaId} but the delivery came under WABA ${resolution.entryWabaId}. Not routed to any workspace.`
+      )
+      return
+    case 'ambiguous_number':
+      console.error(
+        `[webhook] ${what} for phone_number_id ${phoneNumberId} matched ${resolution.matches} configs; not routed. Resolve duplicates so each number maps to a single account.`
+      )
+      return
+    case 'missing_entry_id':
+      console.error(
+        `[webhook] ${what} for phone_number_id ${phoneNumberId} rejected: the delivery carries no entry.id (WABA), so the workspace cannot be verified. Not routed.`
+      )
+      return
+    case 'config_missing_waba':
+      console.error(
+        `[webhook] ${what} for phone_number_id ${phoneNumberId} rejected: the workspace config has no stored WABA id to verify against (WHATSAPP_REQUIRE_STORED_WABA=1). Reconnect or backfill waba_id.`
+      )
+      return
+    case 'no_config':
+      console.error(
+        `[webhook] ${what} for phone_number_id ${phoneNumberId} (WABA ${entryWabaId ?? 'unknown'}) matched no workspace; ignored.`
+      )
+      return
+  }
+}
+
+function warnIfWabaUnverified(
+  what: string,
+  phoneNumberId: string | undefined,
+  verified: boolean
+) {
+  if (verified) return
+  console.warn(
+    `[webhook] ${what} for phone_number_id ${phoneNumberId} routed WITHOUT WABA verification: the workspace config has no stored waba_id (legacy row). Backfill it.`
+  )
 }
 
 function metaTimestampToIso(timestamp: string): string | null {
@@ -347,23 +449,36 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       // Handle status updates
       if (value.statuses) {
         const statusAccountId = await resolveAccountForPhoneNumber(
-          value.metadata?.phone_number_id
+          value.metadata?.phone_number_id,
+          entry.id
         )
-        for (const status of value.statuses) {
-          await handleStatusUpdate(status, statusAccountId)
+        if (statusAccountId) {
+          for (const status of value.statuses) {
+            await handleStatusUpdate(status, statusAccountId)
+          }
         }
       }
 
       // Handle incoming messages
       if (!value.messages || !value.contacts) continue
 
-      const phoneNumberId = value.metadata.phone_number_id
+      // Without the business number there is no way to tell which workspace
+      // the message belongs to, so drop it (a malformed or hand-built
+      // payload; Meta always sends metadata.phone_number_id).
+      const phoneNumberId = value.metadata?.phone_number_id
+      if (!phoneNumberId) {
+        console.warn(
+          `[webhook] Inbound message without metadata.phone_number_id (WABA ${entry.id ?? 'unknown'}); dropped, no workspace can be determined.`
+        )
+        continue
+      }
 
-      // Find user's config by phone_number_id. `.single()` returns
-      // PGRST116 for both 0 rows AND ≥2 rows — distinguish them so
-      // operators see the real cause in logs. ≥2 rows shouldn't happen
-      // post-migration 013 (UNIQUE constraint), but a row created
-      // before the constraint, or a race, would still surface here.
+      // Fetch every whatsapp_config row for this phone_number_id (a plain
+      // list query, not .single()). The tenant decision is made below by
+      // resolveTenantForPhoneNumber: zero rows, more than one row (should be
+      // impossible after migration 013's UNIQUE constraint, but a legacy row
+      // or a race could still produce it), a missing entry.id or a WABA
+      // mismatch all drop the message instead of guessing a workspace.
       const { data: configRows, error: configError } = await supabaseAdmin()
         .from('whatsapp_config')
         .select('*')
@@ -378,23 +493,26 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         continue
       }
 
-      if (!configRows || configRows.length === 0) {
-        console.error('No config found for phone_number_id:', phoneNumberId)
-        continue
-      }
-
-      if (configRows.length > 1) {
-        console.error(
-          `Multiple configs (${configRows.length}) found for phone_number_id:`,
+      // One workspace per phone number, and the delivery's WABA (entry.id)
+      // must be the WABA recorded for that workspace. A mismatch is dropped,
+      // not delivered: the number has moved WABA or the row is wrong, and
+      // either way this tenant must not receive that traffic.
+      const resolution = resolveTenantForPhoneNumber<InboundConfigRow>(
+        configRows,
+        entry.id,
+        routingOptions()
+      )
+      if (!resolution.ok) {
+        logTenantRoutingFailure(
+          'Inbound message',
           phoneNumberId,
-          '— inbound message dropped. Resolve duplicates so each number maps to a single account.',
-          'Account owners:',
-          configRows.map((r: { account_id: string; user_id: string }) => `${r.account_id} (admin ${r.user_id})`)
+          entry.id,
+          resolution
         )
         continue
       }
-
-      const config = configRows[0]
+      warnIfWabaUnverified('Inbound message', phoneNumberId, resolution.wabaVerified)
+      const config = resolution.config
 
       const decryptedAccessToken = decrypt(config.access_token)
 

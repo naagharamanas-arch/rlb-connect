@@ -16,8 +16,24 @@ import { resolveMediaLinkForMeta } from '@/lib/storage/media-server'
 
 const ti = getT('Validation.interactive')
 
-const META_API_VERSION = 'v21.0'
-const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
+/**
+ * The Graph API version EVERY Meta call in this app uses. This is the single
+ * source of truth: import `META_API_BASE` instead of declaring a version
+ * anywhere else (a guard test fails the build if a second literal appears).
+ *
+ * Version policy (checked against Meta's published Graph API version table):
+ *   v21.0 was released 2024-10-02 and is available until 2027-01-21. After a
+ *   version is removed Meta defaults calls to the next usable one rather than
+ *   failing, so this is a planned upgrade, not an outage — but it should be
+ *   done before that date, deliberately, not by fallback. Moving is a ONE-LINE
+ *   change here once the Cloud API calls below have been smoke-tested against
+ *   the newer version on a Meta test number. Review the WhatsApp Cloud API
+ *   changelog entries for v22–v26 first (template category handling,
+ *   messaging-limit semantics, status-webhook payload and media-retention
+ *   changes).
+ */
+export const META_API_VERSION = 'v21.0'
+export const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
 
 export interface MetaSendResult {
   messageId: string
