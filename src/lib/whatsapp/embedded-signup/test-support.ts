@@ -27,3 +27,47 @@ export function memoryStore(): SignupSessionStore & { rows: SignupSession[] } {
     },
   }
 }
+
+import type {
+  ConnectionStatus,
+  ConnectionStore,
+  StoredConnection,
+  UpsertConnectionInput,
+} from './connection-store'
+
+/** In-memory ConnectionStore; records every write so tests can assert on it. */
+export function memoryConnectionStore(): ConnectionStore & {
+  rows: Map<string, StoredConnection>
+  writes: UpsertConnectionInput[]
+  statuses: Array<[string, ConnectionStatus]>
+} {
+  const rows = new Map<string, StoredConnection>()
+  const writes: UpsertConnectionInput[] = []
+  const statuses: Array<[string, ConnectionStatus]> = []
+  return {
+    rows,
+    writes,
+    statuses,
+    async getByAccount(accountId) {
+      return rows.get(accountId) ?? null
+    },
+    async upsertConnection(input) {
+      writes.push(input)
+      rows.set(input.accountId, {
+        accountId: input.accountId,
+        phoneNumberId: input.phoneNumberId,
+        wabaId: input.wabaId,
+        status: input.status,
+        registeredAt: input.registeredAt,
+        subscribedAppsAt: input.subscribedAppsAt,
+      })
+    },
+    async markStatus(accountId, status) {
+      const row = rows.get(accountId)
+      if (!row) return { ok: false, reason: 'not_found' }
+      row.status = status
+      statuses.push([accountId, status])
+      return { ok: true }
+    },
+  }
+}
