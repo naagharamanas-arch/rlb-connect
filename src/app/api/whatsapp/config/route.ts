@@ -8,6 +8,7 @@ import {
   toErrorResponse,
 } from '@/lib/auth/account'
 import {
+  getPhoneConnectionKind,
   getSubscribedApps,
   listWabaPhoneNumbers,
   registerPhoneNumber,
@@ -31,6 +32,8 @@ import { resolveVerifyTokenForSave } from '@/lib/whatsapp/verify-token'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { getT } from '@/lib/i18n/translate'
 import { fetchWhatsAppConfig } from '@/lib/credentials/server'
+import { classifyPhoneKind } from '@/lib/whatsapp/connection-status'
+import { isStatusV2Enabled } from '@/lib/whatsapp/status-flag'
 
 const t = getT('Api')
 
@@ -227,10 +230,23 @@ export async function GET() {
       }
     }
 
+    // WA_STATUS_V2 only: say which kind of number this is so the Settings
+    // page does not ask a coexistence / test number for a PIN. Best-effort
+    // (never throws). With the flag off the response is exactly as before.
+    const connectionKind = isStatusV2Enabled()
+      ? classifyPhoneKind(
+          await getPhoneConnectionKind({
+            phoneNumberId: config.phone_number_id,
+            accessToken,
+          }),
+        )
+      : null
+
     return NextResponse.json({
       connected: true,
       phone_info: phoneInfo,
       waba_subscription: wabaSubscription,
+      ...(connectionKind ? { connection_kind: connectionKind } : {}),
     })
   } catch (error) {
     console.error('Error in WhatsApp config GET:', error)
@@ -552,9 +568,21 @@ export async function POST(request: Request) {
       })
     }
 
+    // WA_STATUS_V2 only (see GET): lets the UI word the "no PIN" outcome
+    // correctly for coexistence / test numbers.
+    const connectionKind = isStatusV2Enabled()
+      ? classifyPhoneKind(
+          await getPhoneConnectionKind({
+            phoneNumberId: phone_number_id,
+            accessToken: access_token,
+          }),
+        )
+      : null
+
     return NextResponse.json({
       success: true,
       saved: true,
+      ...(connectionKind ? { connection_kind: connectionKind } : {}),
       registered: registeredAt != null,
       // Credentials are valid and saved, but inbound webhook
       // registration was skipped because no PIN was supplied (e.g. a

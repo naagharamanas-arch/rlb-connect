@@ -150,7 +150,7 @@ Each slice ships independently, is **off by default**, and can be reverted by tu
 
 Flag set: `WA_STATUS_V2`, `ES_CONNECT_ENABLED`, `ES_CONNECT_ACCOUNT_ALLOWLIST` (comma list of account ids; empty = nobody; used to let only the owner's own account see the button before Meta approval), `ES_COEXISTENCE_ENABLED`.
 
-### S0 — Settings status fix (no change to existing Meta calls; adds one best-effort read-only Graph call; **no migration**) · flag `WA_STATUS_V2`
+### S0 — Settings status fix [IMPLEMENTED on branch feat/es-s0-status-v2, not deployed] (no change to existing Meta calls; adds one best-effort read-only Graph call; **no migration**) · flag `WA_STATUS_V2`
 
 * **Why first:** removes the misleading "Not registered / enter PIN" for coexistence/SMB numbers today, for manually connected ones too.
 * **Files:** `src/app/api/whatsapp/config/route.ts` (GET: add `connection_kind`, derived); `src/lib/whatsapp/meta-api.ts` (new best-effort `getPhoneConnectionKind` for `platform_type`-style fields, in a **separate** request so an unknown field on v21 cannot break the existing verify call, same pattern as `getPhoneNumberHealth`); `src/app/api/whatsapp/config/verify-registration/route.ts` (fix F-3); `src/components/settings/whatsapp-config.tsx`; `messages/{en,pt,es,ko}.json`; a pure `src/lib/whatsapp/connection-status.ts`.
@@ -234,7 +234,7 @@ For a coexistence/SMB number: no PIN exists and `/register` must not be called (
 | Condition | UI state | Banner (en) | PIN field | "Verify with Meta" |
 |---|---|---|---|---|
 | `coexistence` or `platformKind = business_app` | `coexistence_live` (if WABA subscribed) / `coexistence_attention` (if not) | "Connected with the WhatsApp Business app (Coexistence). Messages sync with your phone. No PIN is needed." | **hidden** | shown; runs the coexistence check |
-| Cloud API, `registered_at` set | `registered` | existing "Registered" text | hidden once registered (shown only under "Advanced") | shown |
+| Cloud API, `registered_at` set | `registered` | existing "Registered" text | shown (unchanged from today; S0 hides the PIN only for coexistence / test numbers) | shown |
 | Cloud API, `registered_at` NULL, `last_registration_error` set | `registration_failed` | existing failed text + retry | shown | shown |
 | Cloud API, `registered_at` NULL, no error, kind known | `awaiting_registration` | existing hint | shown | shown |
 | Kind **unknown** (Graph field unavailable on this Graph version, call failed, or no config row yet) | `unknown` | neutral: "Registration status could not be determined. Click Verify with Meta." No "Meta will not deliver events" wording. | **shown, optional**, neutral wording ("only needed for a Cloud API number you are registering yourself") | shown |

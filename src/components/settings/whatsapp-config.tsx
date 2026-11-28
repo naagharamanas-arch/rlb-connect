@@ -32,6 +32,16 @@ import {
 } from '@/components/ui/accordion';
 import type { WhatsAppConfig as WhatsAppConfigType } from '@/types';
 import { WHATSAPP_CONFIG_PUBLIC_COLUMNS } from '@/lib/credentials/public-columns';
+import {
+  deriveConnectionStatus,
+  isConnectionKind,
+  type ConnectionKind,
+} from '@/lib/whatsapp/connection-status';
+import {
+  ConnectionStatusBanner,
+  PinField,
+  isCustomBannerState,
+} from './whatsapp-status-parts';
 
 const MASKED_TOKEN = '••••••••••••••••';
 
@@ -91,6 +101,10 @@ export function WhatsAppConfig() {
   const [statusMeta, setStatusMeta] = useState<MetaErrorMeta | null>(null);
   const [saveFailure, setSaveFailure] = useState<MetaFailure | null>(null);
   const [wabaSubscription, setWabaSubscription] = useState<WabaSubscription | null>(null);
+  // Set only when the server runs with WA_STATUS_V2 on (it returns
+  // `connection_kind`). null = flag off / not known to the client: the page
+  // renders exactly as it always did.
+  const [connectionKind, setConnectionKind] = useState<ConnectionKind | null>(null);
   // Guards against re-hydrating the form when the load effect below
   // re-runs for reasons unrelated to actually switching accounts —
   // e.g. Supabase's onAuthStateChange fires a token refresh (new
@@ -123,6 +137,15 @@ export function WhatsAppConfig() {
   // multi-number bug that prompted this work.
   const isRegistered = Boolean(config?.registered_at);
   const lastRegistrationError = config?.last_registration_error ?? null;
+  const statusView = connectionKind
+    ? deriveConnectionStatus({
+        hasConfig: Boolean(config),
+        kind: connectionKind,
+        registeredAt: config?.registered_at,
+        lastRegistrationError,
+        wabaSubscribed: wabaSubscription?.subscribed ?? null,
+      })
+    : null;
 
   const [verifyingRegistration, setVerifyingRegistration] = useState(false);
   type RegistrationProbe = {
@@ -132,6 +155,7 @@ export function WhatsAppConfig() {
     last_registration_error?: string | null;
     registered_at?: string | null;
     subscribed_apps_at?: string | null;
+    connection_kind?: string | null;
   };
   const [registrationProbe, setRegistrationProbe] =
     useState<RegistrationProbe | null>(null);
@@ -204,12 +228,14 @@ export function WhatsAppConfig() {
             setStatusMessage('');
             setStatusMeta(null);
             setWabaSubscription(payload.waba_subscription ?? null);
+            setConnectionKind(isConnectionKind(payload.connection_kind) ? payload.connection_kind : null);
           } else {
             setConnectionStatus('disconnected');
             setResetReason(payload.needs_reset ? 'token_corrupted' : payload.reason === 'meta_api_error' ? 'meta_api_error' : null);
             setStatusMessage(payload.message || '');
             setStatusMeta(payload.meta ?? null);
             setWabaSubscription(null);
+            setConnectionKind(null);
           }
         } catch (err) {
           console.error('Health check failed:', err);
@@ -221,6 +247,7 @@ export function WhatsAppConfig() {
         setStatusMessage('');
         setStatusMeta(null);
         setWabaSubscription(null);
+        setConnectionKind(null);
       }
     } catch (err) {
       console.error('fetchConfig error:', err);
@@ -361,6 +388,14 @@ export function WhatsAppConfig() {
           t('savedButRegistrationFailed', { error: data.registration_error }),
           { duration: 12000 },
         );
+      } else if (
+        data.registration_skipped &&
+        (data.connection_kind === 'coexistence' || data.connection_kind === 'test_number')
+      ) {
+        // WA_STATUS_V2: no PIN is expected for this kind of number, so do
+        // not point the user at a "Not registered" banner.
+        toast.success(t('savedNoPinNeeded'), { duration: 10000 });
+        setPin('');
       } else if (data.registration_skipped) {
         // Credentials saved + verified, but /register was skipped
         // because no PIN was supplied (e.g. a Meta test number).
@@ -404,6 +439,7 @@ export function WhatsAppConfig() {
         setStatusMessage('');
         setStatusMeta(null);
         setWabaSubscription(payload.waba_subscription ?? null);
+        setConnectionKind(isConnectionKind(payload.connection_kind) ? payload.connection_kind : null);
         toast.success(
           payload.phone_info?.verified_name
             ? t('connectedTo', { name: payload.phone_info.verified_name })
@@ -415,6 +451,7 @@ export function WhatsAppConfig() {
         setStatusMessage(payload.message || '');
         setStatusMeta(payload.meta ?? null);
         setWabaSubscription(null);
+        setConnectionKind(null);
         toast.error(payload.message || t('apiConnectionFailed'), { duration: 10000 });
       }
     } catch (err) {
@@ -435,6 +472,7 @@ export function WhatsAppConfig() {
       });
       const data = (await res.json()) as RegistrationProbe;
       setRegistrationProbe(data);
+      if (isConnectionKind(data.connection_kind)) setConnectionKind(data.connection_kind);
       if (data.live) {
         toast.success(t('fullyWired'));
       } else {
@@ -481,6 +519,7 @@ export function WhatsAppConfig() {
       setStatusMeta(null);
       setSaveFailure(null);
       setWabaSubscription(null);
+      setConnectionKind(null);
     } catch (err) {
       console.error('Reset error:', err);
       toast.error(t('resetFailed'));
@@ -509,6 +548,39 @@ export function WhatsAppConfig() {
   }
 
   const showResetBanner = resetReason === 'token_corrupted';
+
+  const probeBlock = registrationProbe && (
+              <div className="mt-3 rounded border border-border bg-card/60 px-3 py-2 space-y-1.5 text-[11px]">
+                <p className="font-medium text-foreground">
+                  {t('diagnosticLastRun')}
+                  <span className={registrationProbe.live ? 'text-emerald-400' : 'text-amber-400'}>
+                    {registrationProbe.live ? t('live') : t('notLive')}
+                  </span>
+                </p>
+                <ul className="space-y-0.5 text-muted-foreground">
+                  {Object.entries(registrationProbe.checks).map(([k, v]) => (
+                    <li key={k} className="flex items-center gap-1.5">
+                      {v === true ? (
+                        <CheckCircle2 className="size-3 text-emerald-400 shrink-0" />
+                      ) : v === false ? (
+                        <XCircle className="size-3 text-red-400 shrink-0" />
+                      ) : (
+                        <span className="size-3 rounded-full border border-border shrink-0" />
+                      )}
+                      <code className="text-muted-foreground">{k}</code>
+                    </li>
+                  ))}
+                </ul>
+                {(registrationProbe.errors ?? []).length > 0 && (
+                  <ul className="pt-1 space-y-0.5 text-red-300">
+                    {registrationProbe.errors?.map((e, i) => (
+                      <li key={i}>• {e}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+
 
   // Step + code + trace id in small muted text, so a user can quote
   // them to Meta support (issue #505). The step names are wire values
@@ -645,7 +717,17 @@ export function WhatsAppConfig() {
             without a successful /register call the number won't
             receive inbound events. Surface this dimension separately
             so users don't trust a misleading green banner. */}
-        {config && (
+        {config && statusView && statusView.customBanner && isCustomBannerState(statusView.state) && (
+          <ConnectionStatusBanner
+            state={statusView.state}
+            t={(key) => t(key as never)}
+            onVerify={handleVerifyRegistration}
+            verifying={verifyingRegistration}
+          >
+            {probeBlock}
+          </ConnectionStatusBanner>
+        )}
+        {config && !statusView?.customBanner && (
           <Alert
             className={
               isRegistered
@@ -709,37 +791,7 @@ export function WhatsAppConfig() {
               )}
             </AlertDescription>
 
-            {registrationProbe && (
-              <div className="mt-3 rounded border border-border bg-card/60 px-3 py-2 space-y-1.5 text-[11px]">
-                <p className="font-medium text-foreground">
-                  {t('diagnosticLastRun')}
-                  <span className={registrationProbe.live ? 'text-emerald-400' : 'text-amber-400'}>
-                    {registrationProbe.live ? t('live') : t('notLive')}
-                  </span>
-                </p>
-                <ul className="space-y-0.5 text-muted-foreground">
-                  {Object.entries(registrationProbe.checks).map(([k, v]) => (
-                    <li key={k} className="flex items-center gap-1.5">
-                      {v === true ? (
-                        <CheckCircle2 className="size-3 text-emerald-400 shrink-0" />
-                      ) : v === false ? (
-                        <XCircle className="size-3 text-red-400 shrink-0" />
-                      ) : (
-                        <span className="size-3 rounded-full border border-border shrink-0" />
-                      )}
-                      <code className="text-muted-foreground">{k}</code>
-                    </li>
-                  ))}
-                </ul>
-                {(registrationProbe.errors ?? []).length > 0 && (
-                  <ul className="pt-1 space-y-0.5 text-red-300">
-                    {registrationProbe.errors?.map((e, i) => (
-                      <li key={i}>• {e}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
+            {probeBlock}
           </Alert>
         )}
 
@@ -830,26 +882,14 @@ export function WhatsAppConfig() {
               </p>
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-muted-foreground">
-                {t('twoStepPin')}
-                <span className="ml-1 text-muted-foreground">{t('optional')}</span>
-              </Label>
-              <Input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                placeholder={t('pinPlaceholder')}
-                value={pin}
-                onChange={(e) =>
-                  setPin(e.target.value.replace(/\D/g, '').slice(0, 6))
-                }
-                className="bg-muted border-border text-foreground placeholder:text-muted-foreground tracking-widest"
-              />
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                <span dangerouslySetInnerHTML={{ __html: t('pinHint') }} />
-              </p>
-            </div>
+            <PinField
+              show={statusView ? statusView.showPinField : true}
+              neutralHint={statusView?.neutralPinHint ?? false}
+              value={pin}
+              onChange={setPin}
+              t={(key) => t(key as never)}
+              hintHtml={t('pinHint')}
+            />
           </CardContent>
         </Card>
 
