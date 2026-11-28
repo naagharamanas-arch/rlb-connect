@@ -159,7 +159,23 @@ html[data-mode="light"] {
 
 /* ---- ACCENT: primary color ---- */
 
+/* RLB brand accent (logo gold #C09050). Default theme. Dark foreground
+ * keeps button text readable on the gold. */
 :root,
+html[data-theme="rlb"] {
+  --primary: oklch(0.7 0.1 75);
+  --primary-foreground: oklch(0.2 0.03 190);
+  --primary-hover: oklch(0.76 0.1 75);
+  --primary-soft: oklch(0.7 0.1 75 / 0.12);
+  --primary-soft-2: oklch(0.7 0.1 75 / 0.22);
+  --ring: oklch(0.7 0.1 75);
+  --chart-1: oklch(0.7 0.1 75);
+  --chart-2: oklch(0.4 0.05 190);
+  --sidebar-primary: oklch(0.7 0.1 75);
+  --sidebar-primary-foreground: oklch(0.2 0.03 190);
+  --sidebar-ring: oklch(0.7 0.1 75);
+}
+
 html[data-theme="violet"] {
   --primary: oklch(0.526 0.247 293);
   --primary-foreground: oklch(0.985 0 0);
