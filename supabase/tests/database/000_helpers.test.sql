@@ -489,5 +489,5 @@ create function tests.u(p_name text) returns uuid language sql stable as $$ sele
 
 select plan(2);
 select ok(true, 'helpers installed');
-select is((select count(*) from tests.table_class)::int, 39, 'classification lists 39 tables');
+select is((select count(*) from tests.table_class)::int, 40, 'classification lists 40 tables');
 select * from finish();

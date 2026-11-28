@@ -44,11 +44,15 @@ select ok(has_table_privilege('service_role', 'public.whatsapp_signup_sessions',
   'POSITIVE CONTROL: service_role can write');
 
 -- Under open grants RLS alone must still refuse writes: there is no write policy.
+-- Convention (110, 020, 030): with every table privilege emulated as granted, an INSERT
+-- that RLS refuses raises 42501 ("new row violates row-level security policy"); it does
+-- not return 0 rows. UPDATE/DELETE are filtered to zero rows (n=0). Because the grants
+-- are open here, a missing GRANT cannot be the cause of the 42501.
 select tests.emulate_legacy_data_api_grants();
 select is(tests.probe_dml(tests.u('a_owner'),
   format('insert into public.whatsapp_signup_sessions (account_id, user_id, state_hash, expires_at) values (%L, %L, %L, now())',
          tests.u('a_acct'), tests.u('a_owner'), 'forged-hash')),
-  'n=0', 'RLS alone (open grants) refuses an owner INSERT');
+  'err=42501', 'RLS alone (open grants) refuses an owner INSERT');
 select is(tests.probe_dml(tests.u('a_owner'),
   format('update public.whatsapp_signup_sessions set status = %L where account_id = %L', 'connected', tests.u('a_acct'))),
   'n=0', 'RLS alone (open grants) refuses an owner UPDATE');
